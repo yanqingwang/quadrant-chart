@@ -31,6 +31,10 @@ export class QuadrantChartView extends FileView {
   private writeChain: Promise<void> = Promise.resolve();
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: QuadrantChartPlugin) {
+    // `super(leaf)` is the idiomatic form and what the plugin factory uses. Obsidian's real
+    // ItemView takes (leaf, app) and exposes it as `this.app`; the shipped type declarations list
+    // only `leaf`, so the app is not forwarded here. Tests assign it directly rather than
+    // distorting this call to suit a stub.
     super(leaf);
   }
 
@@ -46,10 +50,41 @@ export class QuadrantChartView extends FileView {
     return 'layout-grid';
   }
 
+  /**
+   * View state, so Obsidian can restore the binding after a workspace reload or app restart.
+   *
+   * Without this the inherited stub stores nothing, and reopening the view loses which file it was
+   * showing — the view then has no file to read or write.
+   */
+  getState(): Record<string, unknown> {
+    return { file: this.file?.path ?? null };
+  }
+
+  // setState is deliberately NOT overridden. FileView's own implementation is what assigns
+  // `this.file` from the state above; reimplementing it would mean duplicating the framework's
+  // file-binding machinery (and there is no public loadFile to delegate to). The pairing that
+  // matters — getState here, onLoadFile below — is what makes the binding survive a reload.
+
   async onOpen(): Promise<void> {
+    // Chrome only. `this.file` is still null at this point — Obsidian assigns it afterwards and
+    // then calls onLoadFile. Loading the chart here silently did nothing, which left the canvas
+    // showing a default chart and made every write a no-op.
     this.buildChrome();
     this.stopResize = this.canvas?.observeResize() ?? null;
+  }
+
+  /**
+   * The file has been assigned. This is the first moment `this.file` is valid, so it is where the
+   * chart must be read from disk.
+   */
+  async onLoadFile(_file: TFile): Promise<void> {
     await this.reload();
+  }
+
+  async onUnloadFile(_file: TFile): Promise<void> {
+    // Let any in-flight write finish before the file reference goes away, otherwise a save started
+    // just before a tab switch could resolve against a detached file.
+    await this.writeChain;
   }
 
   async onClose(): Promise<void> {
@@ -60,18 +95,28 @@ export class QuadrantChartView extends FileView {
     this.contentEl.empty();
   }
 
-  /** Re-read the file. Called on open and whenever the file changes underneath us. */
+  /** Re-read the file. Called when the file is assigned and whenever it changes underneath us. */
   async reload(): Promise<void> {
-    if (!this.file) return;
-    const loaded = await readChart(this.app, this.file);
+    const file = this.file;
+    if (!file) return;
+    const loaded = await readChart(this.app, file);
     if (!loaded) {
-      this.contentEl.empty();
-      this.contentEl.createEl('p', { text: 'This .mdx file has no quadrant-chart frontmatter.' });
+      // Surface it in the canvas area rather than emptying the view, so the toolbar and the reason
+      // are both visible.
+      this.showMessage('This .mdx file has no quadrant-chart frontmatter. Run "Create quadrant chart" '
+        + 'or add a `quadrant-chart: 1` key to its frontmatter.');
       return;
     }
     this.chart = loaded;
     this.canvas?.setChart(loaded);
     this.renderToolbar();
+  }
+
+  /** Show a message inside the view without destroying the toolbar. */
+  private showMessage(text: string): void {
+    const existing = this.contentEl.querySelector('.qc-message');
+    if (existing) existing.remove();
+    this.contentEl.createDiv({ cls: 'qc-message', text });
   }
 
   // ── chrome ────────────────────────────────────────────────────────────────
@@ -223,11 +268,19 @@ export class QuadrantChartView extends FileView {
    * one's edit — the classic lost-update. Serialising makes each write observe the previous one.
    */
   private async commit(chart: Chart): Promise<void> {
-    if (!this.file) return;
+    const file = this.file;
+    if (!file) {
+      // Previously this returned silently. That is how "the file never saved" went unnoticed: the
+      // canvas updated, the toolbar updated, and nothing reached disk. A write with no target is a
+      // bug in the view's lifecycle, so it is reported rather than swallowed.
+      console.error('[quadrant-chart] refusing to save: the view has no file bound');
+      this.showMessage('Not saving: this view is not bound to a file. Reopen the .mdx file from the vault.');
+      return;
+    }
     this.chart = chart;
     this.writeChain = this.writeChain.then(async () => {
       try {
-        await writeChart(this.app, this.file as TFile, chart);
+        await writeChart(this.app, file, chart);
       } catch (err) {
         new Notice(`Could not save the chart: ${(err as Error).message}`);
       }
