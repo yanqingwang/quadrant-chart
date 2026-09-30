@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "useDefineForClassFields": false,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "types": ["node"],
+    "lib": ["ESNext", "DOM"],
+    "incremental": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "importHelpers": true,
+    "inlineSourceMap": true,
+    "inlineSources": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "tests"]
+}

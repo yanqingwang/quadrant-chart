@@ -1,0 +1,9 @@
+{
+  "id": "quadrant-chart",
+  "name": "Quadrant Chart",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Draw labelled quadrant charts (N x M grid) with free-floating text, stored in .mdx files.",
+  "author": "rosswang",
+  "isDesktopOnly": false
+}

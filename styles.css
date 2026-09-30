@@ -1,0 +1,194 @@
+/* Quadrant Chart — all styling lives here so the plugin ships no inline styles.
+   Colours come from Obsidian's theme variables wherever possible, so a chart follows the user's
+   light/dark theme instead of imposing its own. */
+
+.qc-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* ── toolbar ─────────────────────────────────────────────────────────────── */
+
+.qc-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  flex: 0 0 auto;
+}
+
+.qc-badge {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  padding: 2px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+.qc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+  /* Touch targets: 44px is the accessibility minimum, and this plugin is expected on phones. */
+  min-height: 32px;
+}
+
+.qc-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+.qc-btn-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.qc-btn-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* On narrow screens the labels are dropped and only the icon remains, so the toolbar stays on one
+   row instead of wrapping into a block that eats the canvas. */
+@media (max-width: 520px) {
+  .qc-btn-label {
+    display: none;
+  }
+  .qc-btn {
+    padding: 6px 8px;
+  }
+}
+
+/* ── canvas ──────────────────────────────────────────────────────────────── */
+
+.qc-stage {
+  flex: 1 1 auto;
+  position: relative;
+  min-height: 0;
+  /* The stage owns the gesture; the SVG must not scroll the pane out from under a drag. */
+  touch-action: none;
+  overflow: hidden;
+}
+
+.qc-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.qc-frame {
+  fill: none;
+  stroke: var(--text-faint);
+  stroke-width: 1;
+}
+
+.qc-split {
+  stroke: var(--text-faint);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.qc-split-hit {
+  fill: transparent;
+  /* Widened hit area so a 1px dashed split line is still grabbable with a finger. */
+}
+
+.qc-tick {
+  stroke: var(--text-faint);
+  stroke-width: 1;
+}
+
+.qc-tick-label {
+  fill: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-interface);
+}
+
+.qc-axis-label {
+  fill: var(--text-normal);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-interface);
+}
+
+.qc-title {
+  fill: var(--text-normal);
+  font-size: 15px;
+  font-weight: 700;
+  font-family: var(--font-interface);
+}
+
+/* ── cell (quadrant) text ────────────────────────────────────────────────── */
+
+.qc-cell-text {
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.qc-cell-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
+  font-family: var(--font-interface);
+  margin-bottom: 2px;
+}
+
+.qc-cell-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-interface);
+  line-height: 1.35;
+}
+
+/* ── free-floating labels ────────────────────────────────────────────────── */
+
+.qc-item {
+  cursor: grab;
+}
+
+.qc-item.qc-dragging {
+  cursor: grabbing;
+}
+
+.qc-item-text {
+  font-family: var(--font-text);
+  paint-order: stroke;
+  /* A stroke in the background colour is what keeps a label legible where it crosses a grid line
+     or another label. Cheaper and sharper than a background plate, which would need measuring. */
+  stroke: var(--background-primary);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.qc-item-hit {
+  fill: transparent;
+}
+
+/* ── prompt modal ────────────────────────────────────────────────────────── */
+
+.qc-prompt-input {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.qc-prompt-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

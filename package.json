@@ -1,0 +1,33 @@
+{
+  "name": "obsidian-quadrant-chart",
+  "version": "0.1.0",
+  "description": "Draw labelled quadrant charts (N x M grid) with free-floating text, stored in .mdx files.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit --skipLibCheck",
+    "lint": "eslint src",
+    "test": "jest --passWithNoTests"
+  },
+  "keywords": [
+    "obsidian",
+    "quadrant",
+    "chart",
+    "matrix",
+    "mdx"
+  ],
+  "author": "rosswang",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^26.4.1",
+    "esbuild": "^0.28.2",
+    "jest": "^30.5.1",
+    "js-yaml": "^5.4.2",
+    "obsidian": "^1.13.1",
+    "ts-jest": "^29.4.12",
+    "typescript": "^6.0.3"
+  }
+}
