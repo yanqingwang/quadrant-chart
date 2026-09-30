@@ -20,8 +20,15 @@ export class QuadrantChartView extends FileView {
   private canvas: ChartCanvas | null = null;
   private chart: Chart = createChart();
   private stopResize: (() => void) | null = null;
-  /** Suppresses the reload triggered by our own writes. */
-  private selfWrite = false;
+  /**
+   * Serialises writes to the underlying file.
+   *
+   * Without it, two commits issued in quick succession (add a label, then immediately add
+   * another) can overlap inside `processFrontMatter`, and the second can be written from a chart
+   * snapshot that never saw the first edit. That is a lost update, and it is invisible until the
+   * user closes the file and finds a label missing.
+   */
+  private writeChain: Promise<void> = Promise.resolve();
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: QuadrantChartPlugin) {
     super(leaf);
@@ -208,27 +215,66 @@ export class QuadrantChartView extends FileView {
 
   // ── persistence ───────────────────────────────────────────────────────────
 
-  /** Persist the chart. Every mutation funnels through here so writes are never lost. */
+  /**
+   * Persist the chart. Every mutation funnels through here so writes are never lost.
+   *
+   * Writes are serialised through a promise chain. Two commits that overlap would otherwise race in
+   * `processFrontMatter`, and the slower one can land last with a chart that never saw the faster
+   * one's edit — the classic lost-update. Serialising makes each write observe the previous one.
+   */
   private async commit(chart: Chart): Promise<void> {
     if (!this.file) return;
     this.chart = chart;
-    this.selfWrite = true;
-    try {
-      await writeChart(this.app, this.file, chart);
-    } catch (err) {
-      new Notice(`Could not save the chart: ${(err as Error).message}`);
-    } finally {
-      // Cleared on the next tick: the vault's modify event for our own write fires synchronously
-      // enough to be observed here, and clearing it any later would swallow a genuine external edit.
-      window.setTimeout(() => { this.selfWrite = false; }, 0);
-    }
+    this.writeChain = this.writeChain.then(async () => {
+      try {
+        await writeChart(this.app, this.file as TFile, chart);
+      } catch (err) {
+        new Notice(`Could not save the chart: ${(err as Error).message}`);
+      }
+    });
+    await this.writeChain;
   }
 
-  /** Called by the plugin when the underlying file changes. */
+  /**
+   * Called when the underlying file changes.
+   *
+   * Whether the change came from us or from the user is decided by COMPARING the file to what we
+   * already hold, never by a flag cleared on a timer. The `modify` event for our own write lands at
+   * an unpredictable moment relative to the write's own promise resolution, so any timing-based
+   * suppression is a race that eventually drops an edit. A comparison cannot race: if the file
+   * already matches, there is nothing to do.
+   */
   async onExternalChange(): Promise<void> {
-    if (this.selfWrite) return;
-    await this.reload();
+    if (!this.file) return;
+    // Wait for our own in-flight writes first, or the comparison below could observe an
+    // intermediate state and undo it on the next reload.
+    await this.writeChain;
+    const loaded = await readChart(this.app, this.file);
+    if (!loaded) return;
+    if (chartsEqual(loaded, this.chart)) return; // our own write coming back around
+    this.chart = loaded;
+    this.canvas?.setChart(loaded);
+    this.renderToolbar();
   }
+}
+
+/** Structural equality for two charts, used to decide whether a reload has anything to apply. */
+function chartsEqual(a: Chart, b: Chart): boolean {
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
+
+/** Stable key order, so two structurally identical charts serialise identically. */
+function canonical(c: Chart): unknown {
+  return {
+    title: c.title ?? null,
+    baseFontSize: c.baseFontSize ?? null,
+    x: { label: c.x.label, min: c.x.min, max: c.x.max, ticks: c.x.ticks ?? null },
+    y: { label: c.y.label, min: c.y.min, max: c.y.max, ticks: c.y.ticks ?? null },
+    grid: { columns: c.grid.columns, rows: c.grid.rows },
+    cells: [...c.cells].sort((p, q) => p.col - q.col || p.row - q.row)
+      .map((x) => ({ col: x.col, row: x.row, label: x.label ?? null, color: x.color ?? null, note: x.note ?? null })),
+    items: [...c.items].map((i) => ({ id: i.id, text: i.text, x: i.x, y: i.y, color: i.color ?? null, size: i.size ?? null })),
+  };
 }
 
 export { DEFAULTS };

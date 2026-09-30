@@ -180,6 +180,23 @@
   fill: transparent;
 }
 
+/* ── in-place editable text (axis labels, title) ─────────────────────────── */
+
+/* A dotted underline is the conventional "this text can be edited" affordance, and unlike a hover
+   effect it is visible without interaction — so the capability is discoverable rather than
+   something the user has to guess at. */
+.qc-editable {
+  cursor: text;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--text-faint);
+}
+
+.qc-editable:hover {
+  text-decoration-style: solid;
+  text-decoration-color: var(--text-accent);
+}
+
 /* ── prompt modal ────────────────────────────────────────────────────────── */
 
 .qc-prompt-input {

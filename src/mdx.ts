@@ -73,7 +73,11 @@ export function isChartFile(file: TFile): boolean {
  * user with no way to see — let alone repair — what went wrong.
  */
 export async function readChart(app: App, file: TFile): Promise<Chart | null> {
-  const raw = await app.vault.cachedRead(file);
+  // `read`, never `cachedRead`. `cachedRead` is allowed to serve a cached copy that predates a
+  // recent write, so using it here lets a reload observe the file as it was BEFORE our own write.
+  // That reverts the in-memory chart, and the next edit then persists the reverted chart — which
+  // silently drops whatever the user added in between. This is a data-loss bug, not a stale-UI one.
+  const raw = await app.vault.read(file);
   return parseChartFromText(raw);
 }
 

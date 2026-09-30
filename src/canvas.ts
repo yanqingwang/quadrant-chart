@@ -58,6 +58,7 @@ export class ChartCanvas {
     this.svg.addEventListener('pointerup', this.onPointerUp);
     this.svg.addEventListener('pointercancel', this.onPointerUp);
     this.svg.addEventListener('dblclick', this.onDoubleClick);
+    this.svg.addEventListener('click', this.onClick);
     this.svg.addEventListener('contextmenu', this.onContextMenu);
     this.container.appendChild(this.svg);
     this.measure();
@@ -205,24 +206,26 @@ export class ChartCanvas {
       });
       label.textContent = formatTick(t);
     }
-    // Axis titles. X sits under the ticks, Y is rotated up the left gutter.
+    // Axis titles. X sits under the ticks, Y is rotated up the left gutter. Both are editable in
+    // place: a single click opens the rename prompt, so an axis can be relabelled without going back
+    // to the toolbar. `data-axis` is what the click handler reads to know which one was hit.
     if (x.label) {
       const t = svg(this.svg, 'text', {
         x: rect.x + rect.width / 2, y: rect.y + rect.height + 42,
-        class: 'qc-axis-label', 'text-anchor': 'middle',
+        class: 'qc-axis-label qc-editable', 'text-anchor': 'middle', 'data-axis': 'x',
       });
       t.textContent = x.label;
     }
     if (y.label) {
       const t = svg(this.svg, 'text', {
-        x: 16, y: rect.y + rect.height / 2, class: 'qc-axis-label', 'text-anchor': 'middle',
-        transform: `rotate(-90 16 ${rect.y + rect.height / 2})`,
+        x: 16, y: rect.y + rect.height / 2, class: 'qc-axis-label qc-editable', 'text-anchor': 'middle',
+        transform: `rotate(-90 16 ${rect.y + rect.height / 2})`, 'data-axis': 'y',
       });
       t.textContent = y.label;
     }
     if (chart.title) {
       const t = svg(this.svg, 'text', {
-        x: rect.x, y: Math.max(14, rect.y - 10), class: 'qc-title',
+        x: rect.x, y: Math.max(14, rect.y - 10), class: 'qc-title qc-editable', 'data-axis': 'title',
       });
       t.textContent = chart.title;
     }
@@ -363,6 +366,25 @@ export class ChartCanvas {
     void this.addItem(x, y);
   };
 
+  /**
+   * Single click on an axis label (or the title) renames it in place.
+   *
+   * A single click rather than a double click, unlike labels: the axis captions sit in empty gutter
+   * space where nothing else can be hit, so there is no gesture to disambiguate from and no reason
+   * to make the user wait. `stopPropagation` keeps the rename from also registering as a canvas
+   * gesture, and a click that lands on a label or a split line is ignored here — those keep their
+   * own drag semantics and must not be interrupted by a stray click.
+   */
+  private onClick = (evt: MouseEvent): void => {
+    const target = evt.target as Element;
+    if (target.closest?.('.qc-item') || target.closest?.('.qc-split-hit')) return;
+    const axis = target.getAttribute?.('data-axis');
+    if (axis !== 'x' && axis !== 'y' && axis !== 'title') return;
+    evt.stopPropagation();
+    if (axis === 'title') void this.renameTitle();
+    else void this.renameAxis(axis);
+  };
+
   private onContextMenu = (evt: MouseEvent): void => {
     const target = evt.target as Element;
     const id = target.closest?.('.qc-item')?.getAttribute('data-item-id');
@@ -388,6 +410,29 @@ export class ChartCanvas {
       y: round2(y ?? (chart.y.min + chart.y.max) / 2),
     };
     this.chart = { ...chart, items: [...chart.items, item] };
+    this.render();
+    this.cb.onChange(this.chart);
+  }
+
+  /** Rename the X or Y axis, in place. An emptied label falls back to the default axis name. */
+  async renameAxis(which: 'x' | 'y'): Promise<void> {
+    const current = this.getChart()[which].label;
+    const text = await this.cb.promptText(current, `Rename ${which.toUpperCase()} axis`);
+    if (text === null) return; // cancelled — leave everything as it was
+    const t = text.trim();
+    if (t === current) return; // unchanged — do not dirty the file for nothing
+    this.chart = { ...this.chart, [which]: { ...this.chart[which], label: t || `X axis` } };
+    this.render();
+    this.cb.onChange(this.chart);
+  }
+
+  /** Rename the chart title. An emptied title removes it, which the view already handles. */
+  async renameTitle(): Promise<void> {
+    const text = await this.cb.promptText(this.getChart().title ?? '', 'Chart title');
+    if (text === null) return;
+    const t = text.trim();
+    if (t === (this.chart.title ?? '')) return;
+    this.chart = { ...this.chart, title: t || undefined };
     this.render();
     this.cb.onChange(this.chart);
   }
