@@ -12,6 +12,7 @@
  */
 
 import { App, TFile, parseYaml, stringifyYaml } from 'obsidian';
+import { diag } from './diag';
 import { Chart, normalizeChart, createChart, DEFAULTS } from './model';
 
 /**
@@ -147,12 +148,82 @@ export function extractBody(text: string): string {
  * re-added, which also fixes the key order: assigning to an existing key keeps its old position, so
  * without the clear a chart edited over many sessions would accumulate the original ordering.
  */
+/**
+ * Write the chart back, preserving the body.
+ *
+ * Uses `vault.process`, NOT `fileManager.processFrontMatter`.
+ *
+ * `processFrontMatter` was the obvious choice — it edits only the frontmatter block and leaves the
+ * body alone — but on a `.mdx` file it is a NO-OP that resolves successfully. Measured on a live
+ * vault: `commit items=4` -> `processFrontMatter returned OK` -> `VERIFY onDisk items=3`. It
+ * resolves, raises nothing, and leaves the file byte-identical, so the plugin appeared to save while
+ * nothing was ever written. Its contract is tied to Obsidian's markdown handling, which a custom
+ * extension registered against a custom view does not go through.
+ *
+ * `vault.process(file, fn)` is a read-modify-write over the raw text, independent of file type, and
+ * Obsidian performs it as a single operation. Only the frontmatter block is rewritten; everything
+ * after it — the user's prose — is carried across untouched.
+ */
 export async function writeChart(app: App, file: TFile, chart: Chart): Promise<void> {
-  const next = chartToFrontmatter(chart);
-  await app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
-    for (const key of Object.keys(fm)) delete fm[key];
-    Object.assign(fm, next);
-  });
+  await diag(app, `writeChart: ${file.path} items=${chart.items.length}`);
+  try {
+    await app.vault.process(file, (text) => spliceFrontmatter(text, chart));
+    // Confirm the write landed rather than trusting the call. Isolated in its own try/catch: a
+    // failure here must never be reported as a failed save when the save itself succeeded.
+    try {
+      const after = await app.vault.read(file);
+      const reparsed = parseChartFromText(after);
+      await diag(app, `writeChart: VERIFY onDisk items=${reparsed?.items.length ?? 'PARSE_FAIL'}`);
+      if (reparsed && reparsed.items.length !== chart.items.length) {
+        throw new Error(`save verification failed: wrote ${chart.items.length} labels but the file has ${reparsed.items.length}`);
+      }
+    } catch (e) {
+      if ((e as Error).message.startsWith('save verification failed')) throw e;
+      await diag(app, `writeChart: verify read skipped (${(e as Error).message})`);
+    }
+  } catch (err) {
+    await diag(app, `writeChart: THREW ${(err as Error).message}`);
+    throw err;
+  }
+}
+
+/**
+ * Replace only the YAML frontmatter block, returning the whole file.
+ *
+ * Deliberately byte-preserving outside the block: the lines before the opening `---` and every line
+ * after the closing `---` are carried through unchanged, so a user's body keeps its own spacing,
+ * trailing newlines and any `---` inside it. The body is never re-serialised, because doing so would
+ * silently reflow their notes.
+ *
+ * Handles the three shapes a file can be in: a normal frontmatter block, no frontmatter at all (one
+ * is prepended, keeping the old text as the body), and an unterminated block (treated as body, since
+ * guessing where it was meant to end would risk eating real content).
+ */
+export function spliceFrontmatter(text: string, chart: Chart): string {
+  const yaml = stringifyYaml(chartToFrontmatter(chart) as Record<string, unknown>).replace(/\n+$/, '');
+  const lines = text.split('\n');
+
+  let i = 0;
+  while (i < lines.length && lines[i].trim() === '') i += 1;
+
+  if (i >= lines.length || lines[i].trim() !== '---') {
+    const body = text.replace(/^\n+/, '');
+    return `---\n${yaml}\n---\n\n${body}`;
+  }
+
+  const start = i + 1;
+  let end = -1;
+  for (let j = start; j < lines.length; j += 1) {
+    if (lines[j].trim() === '---') { end = j; break; }
+  }
+  if (end === -1) {
+    // Unterminated: the whole file is body. Prepending is the only safe reading.
+    return `---\n${yaml}\n---\n\n${text.replace(/^\n+/, '')}`;
+  }
+
+  // Replace only the block's contents; the delimiters themselves and everything else stay put.
+  lines.splice(start, end - start, ...yaml.split('\n'));
+  return lines.join('\n');
 }
 
 /** Full file text for a new chart, frontmatter plus an optional body. */

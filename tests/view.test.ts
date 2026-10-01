@@ -42,7 +42,7 @@ body text that must survive
 function makeApp(initial: Record<string, string> = {}) {
   const files = new Map<string, string>(Object.entries(initial));
   const writes: string[] = [];
-  const vault = {
+  const vault: Record<string, unknown> = {
     getAbstractFileByPath: (p: string) => (files.has(p) ? new TFile(p, files.get(p)) : null),
     async read(file: TFile) { return files.get(file.path) ?? ''; },
     async modify(file: TFile, data: string) { files.set(file.path, data); writes.push(file.path); },
@@ -50,22 +50,19 @@ function makeApp(initial: Record<string, string> = {}) {
     getRoot: () => ({ path: '/' }),
     create: async () => { throw new Error('not used'); },
   };
-  // processFrontMatter is what the real save path uses. Modelled FAITHFULLY to the shipped API:
-  //   processFrontMatter(file, fn: (frontmatter) => void): Promise<void>
-  // The callback MUTATES the object it is given; its return value is discarded. An earlier version of
-  // this stub used the return value (`const next = fn(current) ?? {}`) — the OPPOSITE of the real
-  // contract — which made the plugin's return-based write look correct in tests while doing nothing
-  // at runtime. The stub was the thing that was wrong, so it is corrected to match the d.ts.
+  // processFrontMatter is deliberately a NO-OP here, because that is what Obsidian actually does to a
+  // .mdx file: it resolves successfully and changes nothing (measured on a live vault — "returned OK"
+  // with the file byte-identical). The view must therefore save through vault.process, which the stub
+  // below implements. A plugin that reached for processFrontMatter would pass every test here and
+  // still never write, which is exactly what happened.
   const fileManager = {
-    async processFrontMatter(file: TFile, fn: (fm: Record<string, unknown>) => void) {
-      const text = files.get(file.path) ?? '';
-      const m = /^---\n([\s\S]*?)\n---\n?/.exec(text);
-      const fm = (m ? require('js-yaml').load(m[1]) ?? {} : {}) as Record<string, unknown>;
-      fn(fm);                                   // return value intentionally ignored
-      const body = m ? text.slice(m[0].length) : text;
-      files.set(file.path, `---\n${require('js-yaml').dump(fm)}---\n${body}`);
-      writes.push(file.path);
-    },
+    async processFrontMatter() { /* no-op, as Obsidian behaves for .mdx */ },
+  };
+  vault.process = async (file: TFile, fn: (t: string) => string) => {
+    writes.push(file.path);
+    const next = fn(files.get(file.path) ?? '');
+    files.set(file.path, next);
+    return next;
   };
   return { app: { vault, fileManager, workspace: { on: () => ({}), getLeavesOfType: () => [], setActiveLeaf: () => {} } } as never, files, writes };
 }

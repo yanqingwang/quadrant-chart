@@ -13,6 +13,7 @@ import QuadrantChartPlugin from './main';
 import { Chart, createChart, LIMITS, DEFAULTS } from './model';
 import { readChart, writeChart } from './mdx';
 import { ChartCanvas } from './canvas';
+import { diag } from './diag';
 
 export const VIEW_TYPE_QUADRANT = 'quadrant-chart-view';
 
@@ -24,9 +25,9 @@ export class QuadrantChartView extends FileView {
    * Serialises writes to the underlying file.
    *
    * Without it, two commits issued in quick succession (add a label, then immediately add
-   * another) can overlap inside `processFrontMatter`, and the second can be written from a chart
-   * snapshot that never saw the first edit. That is a lost update, and it is invisible until the
-   * user closes the file and finds a label missing.
+   * another) can overlap, and the second can be written from a chart snapshot that never saw the
+   * first edit. That is a lost update, and it is invisible until the user closes the file and finds
+   * a label missing.
    */
   private writeChain: Promise<void> = Promise.resolve();
 
@@ -66,6 +67,7 @@ export class QuadrantChartView extends FileView {
   // matters — getState here, onLoadFile below — is what makes the binding survive a reload.
 
   async onOpen(): Promise<void> {
+    await diag(this.app, 'onOpen (file not yet assigned by Obsidian)');
     // Chrome only. `this.file` is still null at this point — Obsidian assigns it afterwards and
     // then calls onLoadFile. Loading the chart here silently did nothing, which left the canvas
     // showing a default chart and made every write a no-op.
@@ -77,7 +79,8 @@ export class QuadrantChartView extends FileView {
    * The file has been assigned. This is the first moment `this.file` is valid, so it is where the
    * chart must be read from disk.
    */
-  async onLoadFile(_file: TFile): Promise<void> {
+  async onLoadFile(file: TFile): Promise<void> {
+    await diag(this.app, `onLoadFile ${file.path}`);
     await this.reload();
   }
 
@@ -100,6 +103,7 @@ export class QuadrantChartView extends FileView {
     const file = this.file;
     if (!file) return;
     const loaded = await readChart(this.app, file);
+    await diag(this.app, `reload ${file.path} parsed=${loaded ? 'yes' : 'NO (not a chart)'} items=${loaded?.items.length ?? '-'}`);
     if (!loaded) {
       // Surface it in the canvas area rather than emptying the view, so the toolbar and the reason
       // are both visible.
@@ -264,15 +268,16 @@ export class QuadrantChartView extends FileView {
    * Persist the chart. Every mutation funnels through here so writes are never lost.
    *
    * Writes are serialised through a promise chain. Two commits that overlap would otherwise race in
-   * `processFrontMatter`, and the slower one can land last with a chart that never saw the faster
+   * the write itself, and the slower one can land last with a chart that never saw the faster
    * one's edit — the classic lost-update. Serialising makes each write observe the previous one.
    */
   private async commit(chart: Chart): Promise<void> {
     const file = this.file;
+    // Logged FIRST, before any branch. "The save path was never entered" and "it was entered but had
+    // no file" must be distinguishable, and an earlier version logged only after the null check — so
+    // the most likely failure produced no log at all, which is indistinguishable from a silent no-op.
+    await diag(this.app, `commit ENTERED items=${chart.items.length} file=${file ? file.path : 'NULL'}`);
     if (!file) {
-      // Previously this returned silently. That is how "the file never saved" went unnoticed: the
-      // canvas updated, the toolbar updated, and nothing reached disk. A write with no target is a
-      // bug in the view's lifecycle, so it is reported rather than swallowed.
       console.error('[quadrant-chart] refusing to save: the view has no file bound');
       this.showMessage('Not saving: this view is not bound to a file. Reopen the .mdx file from the vault.');
       return;
@@ -281,7 +286,9 @@ export class QuadrantChartView extends FileView {
     this.writeChain = this.writeChain.then(async () => {
       try {
         await writeChart(this.app, file, chart);
+        await diag(this.app, `commit DONE items=${chart.items.length}`);
       } catch (err) {
+        await diag(this.app, `commit FAILED ${(err as Error).message}`);
         new Notice(`Could not save the chart: ${(err as Error).message}`);
       }
     });

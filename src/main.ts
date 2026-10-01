@@ -7,7 +7,7 @@
  * ever gains a real MDX toolchain, the two would compete for the same suffix.
  */
 
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
+import { App, DataAdapter, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
 import { Chart, DEFAULTS, LIMITS, createChart, clampInt } from './model';
 import { chartToFileText, defaultBody } from './mdx';
 import { VIEW_TYPE_QUADRANT, QuadrantChartView } from './view';
@@ -31,6 +31,11 @@ export default class QuadrantChartPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+
+    // Expose the adapter and plugin dir for the save-path diagnostics in mdx.ts, set before anything
+    // else so even a startup failure is recorded.
+    (globalThis as Record<string, unknown>)['__qcAdapter'] = (this.app.vault as unknown as { adapter?: DataAdapter }).adapter;
+    (globalThis as Record<string, unknown>)['__qcPluginDir'] = `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
 
     // `.mdx` is not a format Obsidian knows, so it must be claimed or the vault will treat these
     // files as opaque binaries and never offer them for opening.
