@@ -138,14 +138,20 @@ export function extractBody(text: string): string {
 /**
  * Write the chart back, preserving the body.
  *
- * `processFrontMatter` mutates the file in place, so this is a read-modify-write with no window in
- * which the file holds neither state.
+ * `processFrontMatter` hands the callback the CURRENT frontmatter and writes back whatever that
+ * object contains when the callback returns. The callback's return value is IGNORED — its type is
+ * `(frontmatter: any) => void`. Returning a fresh object therefore does nothing at all: the original
+ * frontmatter is written straight back, the file looks untouched, and no error is raised.
+ *
+ * So the chart is applied by MUTATING the object in place. Every key is cleared first and then
+ * re-added, which also fixes the key order: assigning to an existing key keeps its old position, so
+ * without the clear a chart edited over many sessions would accumulate the original ordering.
  */
 export async function writeChart(app: App, file: TFile, chart: Chart): Promise<void> {
-  await app.fileManager.processFrontMatter(file, () => {
-    // Return a fresh object: the callback's return value replaces the whole frontmatter block, so
-    // keys the chart no longer has (a deleted item, a removed tick) must be absent, not left behind.
-    return chartToFrontmatter(chart);
+  const next = chartToFrontmatter(chart);
+  await app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+    for (const key of Object.keys(fm)) delete fm[key];
+    Object.assign(fm, next);
   });
 }
 

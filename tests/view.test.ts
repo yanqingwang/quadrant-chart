@@ -50,16 +50,20 @@ function makeApp(initial: Record<string, string> = {}) {
     getRoot: () => ({ path: '/' }),
     create: async () => { throw new Error('not used'); },
   };
-  // processFrontMatter is what the real save path uses. Modelled faithfully enough to prove the
-  // frontmatter is replaced and the body is left alone.
+  // processFrontMatter is what the real save path uses. Modelled FAITHFULLY to the shipped API:
+  //   processFrontMatter(file, fn: (frontmatter) => void): Promise<void>
+  // The callback MUTATES the object it is given; its return value is discarded. An earlier version of
+  // this stub used the return value (`const next = fn(current) ?? {}`) — the OPPOSITE of the real
+  // contract — which made the plugin's return-based write look correct in tests while doing nothing
+  // at runtime. The stub was the thing that was wrong, so it is corrected to match the d.ts.
   const fileManager = {
-    async processFrontMatter(file: TFile, fn: (fm: unknown) => unknown) {
+    async processFrontMatter(file: TFile, fn: (fm: Record<string, unknown>) => void) {
       const text = files.get(file.path) ?? '';
       const m = /^---\n([\s\S]*?)\n---\n?/.exec(text);
-      const current = m ? require('js-yaml').load(m[1]) ?? {} : {};
-      const next = fn(current) ?? {};
+      const fm = (m ? require('js-yaml').load(m[1]) ?? {} : {}) as Record<string, unknown>;
+      fn(fm);                                   // return value intentionally ignored
       const body = m ? text.slice(m[0].length) : text;
-      files.set(file.path, `---\n${require('js-yaml').dump(next)}---\n${body}`);
+      files.set(file.path, `---\n${require('js-yaml').dump(fm)}---\n${body}`);
       writes.push(file.path);
     },
   };
