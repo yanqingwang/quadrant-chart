@@ -34,6 +34,8 @@ export interface CanvasCallbacks {
   promptText(defaultValue: string, title: string): Promise<string | null>;
   /** The file this canvas edits, for error surfaces. */
   file: TFile;
+  /** Called when the user clicks a cell, so the toolbar can act on the chosen one. */
+  onSelectCell?(col: number, row: number): void;
 }
 
 export class ChartCanvas {
@@ -43,6 +45,8 @@ export class ChartCanvas {
   private drag: DragMode = { kind: 'none' };
   /** Live position while dragging, so the model is not rewritten on every pointermove. */
   private draft: Chart | null = null;
+  /** The cell the user last clicked. Null means "none chosen"; the view falls back to the middle. */
+  private selected: { col: number; row: number } | null = null;
   private resizeObserver: ResizeObserver | null = null;
 
   constructor(
@@ -107,6 +111,26 @@ export class ChartCanvas {
     this.svg.remove();
   }
 
+  /** Select a cell and redraw the highlight. Passing null clears the selection. */
+  setSelectedCell(col: number | null, row: number | null): void {
+    this.selected = col === null || row === null ? null : { col, row };
+    this.render();
+  }
+
+  /** The currently selected cell, or null. */
+  getSelectedCell(): { col: number; row: number } | null {
+    return this.selected;
+  }
+
+  /** The cell actions apply to: the one the user clicked, else the middle of the grid. */
+  effectiveCell(): { col: number; row: number } {
+    if (this.selected) return this.selected;
+    return {
+      col: Math.floor(this.getChart().grid.columns / 2),
+      row: Math.floor(this.getChart().grid.rows / 2),
+    };
+  }
+
   // ── rendering ─────────────────────────────────────────────────────────────
 
   render(): void {
@@ -126,8 +150,21 @@ export class ChartCanvas {
     for (let row = 0; row < chart.grid.rows; row += 1) {
       for (let col = 0; col < chart.grid.columns; col += 1) {
         const cell = findCell(chart, col, row);
-        if (!cell || (!cell.color && !cell.label && !cell.note)) continue;
         const r = cellRect(chart, col, row, rect);
+        // A hit target for every cell, decorated or not. The label is drawn in a foreignObject with
+        // pointer-events disabled, so without this a cell with no label or colour could not be
+        // clicked at all — and therefore could not be selected or named.
+        svg(this.svg, 'rect', {
+          x: r.x, y: r.y, width: r.width, height: r.height,
+          class: 'qc-cell-hit', 'data-cell-col': col, 'data-cell-row': row,
+        });
+        if (this.selected && this.selected.col === col && this.selected.row === row) {
+          svg(this.svg, 'rect', {
+            x: r.x + 1.5, y: r.y + 1.5, width: Math.max(1, r.width - 3), height: Math.max(1, r.height - 3),
+            class: 'qc-cell-selected', rx: 3,
+          });
+        }
+        if (!cell || (!cell.color && !cell.label && !cell.note)) continue;
         if (cell.color) {
           svg(this.svg, 'rect', {
             x: r.x, y: r.y, width: r.width, height: r.height,
@@ -377,6 +414,20 @@ export class ChartCanvas {
    */
   private onClick = (evt: MouseEvent): void => {
     const target = evt.target as Element;
+
+    // A click on a cell selects it and does nothing else. Checked first because the cell hit rects
+    // cover the whole plot, so every other click on the plot would otherwise land on one.
+    const cellCol = target.getAttribute?.('data-cell-col');
+    const cellRow = target.getAttribute?.('data-cell-row');
+    if (cellCol !== null && cellCol !== undefined && cellRow !== null && cellRow !== undefined) {
+      // A click that lands on a label or a split line keeps that element's own behaviour instead.
+      if (target.closest?.('.qc-item') || target.closest?.('.qc-split-hit')) return;
+      this.selected = { col: Number(cellCol), row: Number(cellRow) };
+      this.cb.onSelectCell?.(this.selected.col, this.selected.row);
+      this.render();
+      return;
+    }
+
     if (target.closest?.('.qc-item') || target.closest?.('.qc-split-hit')) return;
     const axis = target.getAttribute?.('data-axis');
     if (axis !== 'x' && axis !== 'y' && axis !== 'title') return;
@@ -472,6 +523,8 @@ export class ChartCanvas {
     // Cells outside the new grid would render nowhere; drop them rather than silently misplacing.
     const cells = chart.cells.filter((c) => c.col < columns && c.row < rows);
     this.chart = { ...chart, grid: { columns, rows }, cells };
+    // A selection that no longer exists would leave the toolbar acting on a cell that is not drawn.
+    if (this.selected && (this.selected.col >= columns || this.selected.row >= rows)) this.selected = null;
     this.render();
     this.cb.onChange(this.chart);
   }

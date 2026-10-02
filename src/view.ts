@@ -10,10 +10,12 @@
 
 import { FileView, Menu, Notice, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
 import QuadrantChartPlugin from './main';
-import { Chart, createChart, LIMITS, DEFAULTS } from './model';
+import { Chart, Cell, createChart, LIMITS, DEFAULTS } from './model';
 import { readChart, writeChart } from './mdx';
 import { ChartCanvas } from './canvas';
 import { diag } from './diag';
+import { PALETTE, promptColor, sameColor } from './colorUi';
+import { findCell } from './geometry';
 
 export const VIEW_TYPE_QUADRANT = 'quadrant-chart-view';
 
@@ -137,6 +139,9 @@ export class QuadrantChartView extends FileView {
       file: this.file as TFile,
       onChange: (chart) => void this.commit(chart),
       promptText: (def, title) => this.plugin.promptText(def, title),
+      // Repaint the toolbar so the Cell button names the cell the user just clicked. Without this
+      // the button would keep saying "the middle one" while the highlight was somewhere else.
+      onSelectCell: () => this.renderToolbar(),
     });
   }
 
@@ -159,7 +164,7 @@ export class QuadrantChartView extends FileView {
     // that the size was adjustable or what it currently was.
     this.button(bar, `Grid ${this.chart.grid.columns}×${this.chart.grid.rows}`, 'layout-grid',
       'Change how many columns and rows the plot is divided into', (e) => this.pickGrid(e));
-    this.button(bar, 'Cell', 'square', 'Name the cell in the middle of the plot', () => void this.nameCellAtCentre());
+    this.button(bar, 'Cell', 'square', 'Name and colour the cell in the middle of the plot', (e) => this.pickCell(e));
     this.button(bar, 'Axes', 'axis', 'Rename the axes and set their ranges', (e) => this.pickAxes(e));
     this.button(bar, 'Title', 'type', 'Set the chart title', () => void this.promptTitle());
   }
@@ -278,6 +283,93 @@ export class QuadrantChartView extends FileView {
     const title = await this.plugin.promptText(this.chart.title ?? '', 'Chart title');
     if (title === null) return;
     this.chart = { ...this.chart, title: title.trim() || undefined };
+    this.canvas?.setChart(this.chart);
+    this.renderToolbar();
+    await this.commit(this.chart);
+  }
+
+  /**
+   * Cell actions: name it, colour it, or both.
+   *
+   * Acts on the cell the user CLICKED on the canvas, falling back to the middle of the grid when
+   * nothing is selected. Previously the target was hard-coded to the middle, so naming any other
+   * cell meant editing the frontmatter by hand — the click-to-select step is what makes "select a
+   * cell, then name it" work.
+   */
+  private pickCell(e: MouseEvent): void {
+    const { col, row } = this.canvas?.effectiveCell() ?? {
+      col: Math.floor(this.chart.grid.columns / 2),
+      row: Math.floor(this.chart.grid.rows / 2),
+    };
+    const existing = findCell(this.chart, col, row);
+    const menu = new Menu();
+    const where = `cell ${col + 1},${row + 1}`;
+
+    menu.addItem((it) => it
+      .setSection(`Cell ${col + 1},${row + 1}`)
+      .setTitle(existing?.label ? `Rename "${existing.label}"…` : 'Set name…')
+      .onClick(() => void this.canvas?.editCell(col, row)));
+
+    menu.addItem((it) => it
+      .setSection(`Cell ${col + 1},${row + 1}`)
+      .setTitle('Set note…')
+      .onClick(() => void this.editCellNote(col, row)));
+
+    for (const sw of PALETTE) {
+      menu.addItem((it) => it
+        .setSection('Background colour')
+        .setTitle(sw.name)
+        .setChecked(sameColor(existing?.color, sw.hex))
+        .onClick(() => this.setCellColor(col, row, sw.hex)));
+    }
+    menu.addItem((it) => it
+      .setSection('Background colour')
+      .setTitle('Custom colour…')
+      .onClick(() => void this.pickCustomCellColor(col, row)));
+    if (existing?.color) {
+      menu.addItem((it) => it
+        .setSection('Background colour')
+        .setTitle('Remove colour')
+        .onClick(() => this.setCellColor(col, row, null)));
+    }
+    menu.showAtMouseEvent(e);
+    void where;
+  }
+
+  /** Apply (or clear) a cell's background. `hex === null` removes the tint only. */
+  private setCellColor(col: number, row: number, hex: string | null): void {
+    const others = this.chart.cells.filter((c) => !(c.col === col && c.row === row));
+    const existing = findCell(this.chart, col, row);
+    // Dropping the whole record on "remove colour" would take the cell's name and note with it —
+    // clearing a tint should not delete what the user wrote. The record itself goes only if clearing
+    // the tint leaves nothing behind.
+    const kept: Cell = { col, row, label: existing?.label, note: existing?.note, color: hex ?? undefined };
+    const cells = hex === null && !existing?.label && !existing?.note
+      ? others
+      : [...others, kept];
+    this.chart = { ...this.chart, cells };
+    this.canvas?.setChart(this.chart);
+    this.renderToolbar();
+    void this.commit(this.chart);
+  }
+
+  private async pickCustomCellColor(col: number, row: number): Promise<void> {
+    const existing = findCell(this.chart, col, row);
+    const picked = await promptColor(this.app, `Background colour — cell ${col + 1},${row + 1}`, existing?.color ?? null);
+    if (picked === null) return;                       // cancelled
+    this.setCellColor(col, row, picked === '' ? null : picked);
+  }
+
+  private async editCellNote(col: number, row: number): Promise<void> {
+    const existing = findCell(this.chart, col, row);
+    const note = await this.plugin.promptText(existing?.note ?? '', `Note for cell ${col + 1},${row + 1}`);
+    if (note === null) return;
+    const others = this.chart.cells.filter((c) => !(c.col === col && c.row === row));
+    const t = note.trim();
+    const cells = t
+      ? [...others, { col, row, note: t, label: existing?.label, color: existing?.color }]
+      : others;
+    this.chart = { ...this.chart, cells };
     this.canvas?.setChart(this.chart);
     this.renderToolbar();
     await this.commit(this.chart);
