@@ -361,8 +361,10 @@ export class QuadrantChartView extends FileView {
   }
 
   private async editCellNote(col: number, row: number): Promise<void> {
+    await diag(this.app, `editCellNote ${col},${row}`);
     const existing = findCell(this.chart, col, row);
     const note = await this.plugin.promptText(existing?.note ?? '', `Note for cell ${col + 1},${row + 1}`);
+    await diag(this.app, `editCellNote prompt returned ${note === null ? 'CANCEL' : JSON.stringify(note)}`);
     if (note === null) return;
     const others = this.chart.cells.filter((c) => !(c.col === col && c.row === row));
     const t = note.trim();

@@ -12,6 +12,7 @@
  */
 
 import { App, TFile } from 'obsidian';
+import { diag } from './diag';
 import { Chart, Item, LIMITS, DEFAULTS, clampNum } from './model';
 import {
   Margins, PlotRect, DEFAULT_MARGINS,
@@ -166,9 +167,13 @@ export class ChartCanvas {
         }
         if (!cell || (!cell.color && !cell.label && !cell.note)) continue;
         if (cell.color) {
+          // pointer-events:none is essential, not cosmetic. This fill is painted AFTER the hit rect
+          // and covers it completely, so without it every click on a coloured cell lands on the fill,
+          // which carries no cell coordinates — and the cell silently cannot be selected. Only cells
+          // that happened to have no colour were selectable, which is why it looked arbitrary.
           svg(this.svg, 'rect', {
             x: r.x, y: r.y, width: r.width, height: r.height,
-            fill: cell.color, 'fill-opacity': '0.18',
+            class: 'qc-cell-fill', fill: cell.color, 'fill-opacity': '0.18',
           });
         }
         if (!cell.label && !cell.note) continue;
@@ -423,6 +428,7 @@ export class ChartCanvas {
       // A click that lands on a label or a split line keeps that element's own behaviour instead.
       if (target.closest?.('.qc-item') || target.closest?.('.qc-split-hit')) return;
       this.selected = { col: Number(cellCol), row: Number(cellRow) };
+      void diag(this.app, `cell selected ${this.selected.col},${this.selected.row}`);
       this.cb.onSelectCell?.(this.selected.col, this.selected.row);
       this.render();
       return;
@@ -505,8 +511,10 @@ export class ChartCanvas {
   }
 
   async editCell(col: number, row: number): Promise<void> {
+    await diag(this.app, `editCell NAME ${col},${row}`);
     const existing = findCell(this.chart, col, row);
     const text = await this.cb.promptText(existing?.label ?? '', `Name cell (${col + 1}, ${row + 1})`);
+    await diag(this.app, `editCell prompt returned ${text === null ? 'CANCEL' : JSON.stringify(text)}`);
     if (text === null) return;
     const label = text.trim();
     const others = this.chart.cells.filter((c) => !(c.col === col && c.row === row));

@@ -200,9 +200,18 @@
 /* ── cell hit area and selection ──────────────────────────────────────────── */
 
 /* Transparent, but it must still receive clicks: this is what makes a cell selectable, including a
-   cell with no label or colour of its own. */
+   cell with no label or colour of its own.
+   `pointer-events: all` rather than relying on the default `visiblePainted`: a fully transparent fill
+   is not reliably treated as painted by every renderer, and a cell that cannot be hit is a cell that
+   cannot be selected or named. */
 .qc-cell-hit {
   fill: transparent;
+  pointer-events: all;
+}
+
+/* The colour fill is painted over the hit rect, so it must let clicks through to it. */
+.qc-cell-fill {
+  pointer-events: none;
 }
 
 .qc-stage:hover .qc-cell-hit {
