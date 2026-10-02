@@ -7,9 +7,10 @@
  * ever gains a real MDX toolchain, the two would compete for the same suffix.
  */
 
-import { App, DataAdapter, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
+import { App, DataAdapter, Menu, MenuItem, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
 import { Chart, DEFAULTS, LIMITS, createChart, clampInt } from './model';
 import { chartToFileText, defaultBody } from './mdx';
+import { ChartTemplate, TEMPLATES } from './templates';
 import { VIEW_TYPE_QUADRANT, QuadrantChartView } from './view';
 
 export interface QuadrantChartSettings {
@@ -67,6 +68,15 @@ export default class QuadrantChartPlugin extends Plugin {
       id: 'create-quadrant-chart',
       name: 'Create quadrant chart',
       callback: () => void this.createChartCommand(),
+    });
+
+    this.addCommand({
+      id: 'create-quadrant-chart-from-template',
+      name: 'Create quadrant chart from example',
+      // Obsidian types `callback` as taking no arguments, so the click position has to be read off
+      // the window's last event rather than taken as a parameter. The menu is anchored there, so
+      // it appears under the cursor when invoked by mouse and near the centre when by keyboard.
+      callback: () => void this.pickTemplate(lastPointerEvent()),
     });
 
     this.addCommand({
@@ -141,6 +151,59 @@ export default class QuadrantChartPlugin extends Plugin {
     }
     await this.openChart(file);
     new Notice(`Created ${file.path}`);
+  }
+
+  /**
+   * Choose a worked example and create a new chart from it.
+   *
+   * The examples are embedded in the bundle rather than shipped as files in the plugin folder. A
+   * missing sidecar file would give a menu entry that silently does nothing — the same failure mode
+   * that cost this plugin four rounds of debugging elsewhere — and embedding makes that impossible.
+   *
+   * The text is written verbatim, so the new file is byte-identical to the example. It is NOT the
+   * same thing as copying: the example's cells and labels are a starting point, and the user is
+   * expected to replace them.
+   */
+  private pickTemplate(evt: MouseEvent): void {
+    const menu = new Menu();
+    for (const tpl of TEMPLATES) {
+      // The description goes in the title rather than `setDesc`, which this Obsidian version's
+      // MenuItem does not have. Readability in the palette list is worth the slightly long label.
+      menu.addItem((it: MenuItem) => it
+        .setSection('Examples')
+        .setTitle(`${tpl.name} — ${tpl.description}`)
+        .onClick(() => void this.createFromTemplate(tpl)));
+    }
+    menu.showAtMouseEvent(evt);
+  }
+
+  private async createFromTemplate(tpl: ChartTemplate): Promise<void> {
+    const dir = this.app.workspace.getActiveFile()?.parent?.path ?? this.app.vault.getRoot().path;
+    const name = await this.promptText(tpl.suggestedName, `New chart from ${tpl.name} — file name`);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) {
+      new Notice('The file name cannot be empty.');
+      return;
+    }
+    const path = `${dir}/${sanitize(trimmed)}.mdx`;
+    if (this.app.vault.getAbstractFileByPath(path)) {
+      // Refuse rather than overwrite, always — unlike a blank chart, an example is worth keeping,
+      // and silently replacing one would destroy work the user did based on it.
+      new Notice(`${sanitize(trimmed)}.mdx already exists — pick another name.`);
+      return;
+    }
+    let file: TFile;
+    try {
+      const created = await this.app.vault.create(path, tpl.text);
+      if (!(created instanceof TFile)) throw new Error('unexpected file type');
+      file = created;
+    } catch (err) {
+      new Notice(`Could not create the file: ${(err as Error).message}`);
+      return;
+    }
+    await this.openChart(file);
+    new Notice(`Created ${file.path} from the ${tpl.name} example`);
   }
 
   /**
@@ -248,6 +311,21 @@ class QuadrantChartSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }));
   }
+}
+
+/**
+ * The most recent real pointer position on screen, as a synthetic MouseEvent.
+ *
+ * Obsidian types a command's `callback` as taking no arguments, so a command that opens a menu has
+ * no event to anchor itself to. Grabbing the last known pointer position is what makes the menu
+ * appear under the cursor when invoked by mouse. Falls back to the window centre for a keyboard
+ * invocation, where there is no cursor intent to honour and the middle of the screen is the least
+ * surprising place for it.
+ */
+function lastPointerEvent(): MouseEvent {
+  const x = window.innerWidth / 2;
+  const y = window.innerHeight / 2;
+  return new MouseEvent('click', { clientX: x, clientY: y, bubbles: true });
 }
 
 /** Strip characters Obsidian forbids in filenames, and guarantee a non-empty result. */
