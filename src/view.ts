@@ -154,11 +154,12 @@ export class QuadrantChartView extends FileView {
     if (!bar) return;
     bar.empty();
 
-    bar.createEl('span', { text: `${this.chart.grid.columns}×${this.chart.grid.rows}`, cls: 'qc-badge' });
-
     this.button(bar, 'Add label', 'plus', 'Add a free-floating text label', () => void this.canvas?.addItem());
-    this.button(bar, 'Grid', 'layout-grid', 'Change the number of columns and rows', (e) => this.pickGrid(e));
-    this.button(bar, 'Cell', 'square', 'Name the cell under the cursor', () => void this.nameCellAtCentre());
+    // The current size is part of the button text, not a separate badge: "Grid" alone gave no hint
+    // that the size was adjustable or what it currently was.
+    this.button(bar, `Grid ${this.chart.grid.columns}×${this.chart.grid.rows}`, 'layout-grid',
+      'Change how many columns and rows the plot is divided into', (e) => this.pickGrid(e));
+    this.button(bar, 'Cell', 'square', 'Name the cell in the middle of the plot', () => void this.nameCellAtCentre());
     this.button(bar, 'Axes', 'axis', 'Rename the axes and set their ranges', (e) => this.pickAxes(e));
     this.button(bar, 'Title', 'type', 'Set the chart title', () => void this.promptTitle());
   }
@@ -176,21 +177,57 @@ export class QuadrantChartView extends FileView {
 
   // ── toolbar actions ───────────────────────────────────────────────────────
 
+  /**
+   * Grid size picker.
+   *
+   * Split into labelled sections rather than a flat list of "3 × 2" strings. The flat version was
+   * technically able to set any size but was unreadable: nothing said which number was columns and
+   * which was rows, so it read as though only the square options were real. Sections name the axis
+   * each number belongs to, and a checked box shows the current value.
+   *
+   * Beyond 8 the cells become too small to hold a label, so the menu stops there; the model's own
+   * limit (LIMITS.maxSplits) is higher and still applies to hand-edited files.
+   */
   private pickGrid(e: MouseEvent): void {
     const menu = new Menu();
-    const build = (rows: number, cols: number) => {
+
+    // Checked state is read once, when the menu is built — it is only a snapshot for display.
+    // The click handlers deliberately re-read `this.chart.grid` instead of closing over the value
+    // captured here: a menu can stay open across two clicks (and Obsidian's own behaviour here has
+    // varied), and a closure would then apply the second choice against a stale size, silently undoing
+    // the first. Reading at click time makes each pick independent of the others.
+    const checkedColumns = this.chart.grid.columns;
+    const checkedRows = this.chart.grid.rows;
+
+    for (let n = 1; n <= 8; n += 1) {
       menu.addItem((it) => it
-        .setTitle(`${cols} × ${rows}`)
-        .setChecked(this.chart.grid.columns === cols && this.chart.grid.rows === rows)
-        .onClick(() => this.canvas?.setGrid(cols, rows)));
-    };
-    for (const n of [1, 2, 3, 4]) {
-      build(n, n);
+        .setSection('Columns (split the horizontal axis)')
+        .setTitle(`${n} column${n === 1 ? '' : 's'}`)
+        .setChecked(checkedColumns === n)
+        .onClick(() => this.canvas?.setGrid(n, this.chart.grid.rows)));
     }
-    for (const n of [2, 3, 4]) {
-      menu.addSeparator();
-      for (const m of [2, 3, 4]) build(n, m);
+    for (let n = 1; n <= 8; n += 1) {
+      menu.addItem((it) => it
+        .setSection('Rows (split the vertical axis)')
+        .setTitle(`${n} row${n === 1 ? '' : 's'}`)
+        .setChecked(checkedRows === n)
+        .onClick(() => this.canvas?.setGrid(this.chart.grid.columns, n)));
     }
+    menu.addItem((it) => it
+      .setSection('Presets')
+      .setTitle('2 × 2 (classic quadrants)')
+      .setChecked(checkedColumns === 2 && checkedRows === 2)
+      .onClick(() => this.canvas?.setGrid(2, 2)));
+    menu.addItem((it) => it
+      .setSection('Presets')
+      .setTitle('3 × 3')
+      .setChecked(checkedColumns === 3 && checkedRows === 3)
+      .onClick(() => this.canvas?.setGrid(3, 3)));
+    menu.addItem((it) => it
+      .setSection('Presets')
+      .setTitle('4 × 4')
+      .setChecked(checkedColumns === 4 && checkedRows === 4)
+      .onClick(() => this.canvas?.setGrid(4, 4)));
     menu.showAtMouseEvent(e);
   }
 

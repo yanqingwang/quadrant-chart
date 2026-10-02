@@ -29,11 +29,20 @@ into the editor.
 
 **Delete text** — right-click it.
 
-**Change the grid** — *Grid* button → pick a size. Drag a dashed split line to change it directly.
+**Change the grid** — the **Grid N×M** button in the toolbar. It opens a menu with three sections:
 
-**Name a cell** — *Cell* button, or edit the frontmatter by hand.
+- **Columns (split the horizontal axis)** — 1 to 8
+- **Rows (split the vertical axis)** — 1 to 8
+- **Presets** — 2 × 2, 3 × 3, 4 × 4
 
-**Name the axes / set the range** — *Axes* button.
+Columns and rows are set independently, so any N × M from 1×1 to 8×8 is reachable; the button always
+shows the current size. You can also drag a dashed split line on the canvas to resize.
+
+**Name a cell** — the **Cell** button names the cell in the middle of the plot. To name a different
+one, resize the grid so that cell is the middle one, or edit the `cells:` list in the frontmatter
+directly, where each entry is `{col, row}` counted from the low end of each axis.
+
+**Name the axes / set the range** — **Axes** button, or just click the X or Y caption on the canvas.
 
 Everything you do is written straight to the file, so you can also just edit the YAML.
 
