@@ -12,8 +12,10 @@ diff-friendly.
 - **Free text anywhere** — labels are not tied to quadrants. Drop one at any coordinate, drag it to
   reposition, double-click to edit, right-click to delete.
 - **Cell labels, notes and colours** — name each cell, add longer text underneath, and tint it.
-- **Styled labels** — give a label its own background plate or an outline, so it stays readable
-  wherever it lands.
+- **Styled labels** — give a label its own background plate, an outline, and its own text size, so
+  it stays readable wherever it lands.
+- **Overlapping labels are reachable** — click the same spot again to step down through the stack, or
+  use *Bring to front* / *Send to back*.
 - **Undo** — <kbd>Ctrl</kbd>+<kbd>Z</kbd> steps back any change, including an accidental drag.
 - **Export** — save the chart as a JPG or PNG next to the `.mdx` file.
 - **Built-in examples** — a SWOT and a talent nine-box, creatable from the command palette.
@@ -42,7 +44,11 @@ the text deletes the label.
 **Select a label or a cell** — click it. A click on a label selects the label, never the cell
 underneath; a click on empty space selects the cell. Both draw a dashed box.
 
-**Style a label** — select it, then *Label* → background colour and/or *Draw a box around it*.
+**Style a label** — select it, then *Label* → background colour, *Draw a box around it*, or a text
+size. *Default* clears the size override so the label follows the chart again.
+
+**Reach a label under another** — click the same spot repeatedly to step down the stack, or use *Send
+to back* / *Bring to front*. Order is stored in the file, so it survives a reload.
 
 **Name a cell** — click the cell, then the **Cell** button.
 
@@ -188,7 +194,7 @@ pipeline of its own, but be aware of it if a vault ever gains a real MDX toolcha
 ```bash
 npm install
 npm run build     # typecheck + production bundle -> main.js
-npm test          # 274 tests: format, geometry, hit-testing, undo, image export, the
+npm test          # 328 tests: format, geometry, hit-testing, undo, image export, the
                   # save path, and interoperability with Script/mdx_chart.py
 ```
 

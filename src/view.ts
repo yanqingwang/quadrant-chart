@@ -261,7 +261,59 @@ export class QuadrantChartView extends FileView {
       .setChecked(item.box === true)
       .onClick(() => this.setLabelBox(item.id, item.box !== true)));
 
+    menu.addSeparator();
+    // Fixed steps rather than a slider or a typed number: a slider gives no way to see the result
+    // before committing, and picking a number blind is the common failure. "Default" clears the
+    // override so the label follows the chart's base size again.
+    menu.addItem((it: MenuItem) => it
+      .setSection('Text size')
+      .setTitle('Default')
+      .setChecked(item.size === undefined)
+      .onClick(() => this.canvas?.setItemSize(item.id, null)));
+    for (const n of LABEL_SIZES) {
+      menu.addItem((it: MenuItem) => it
+        .setSection('Text size')
+        .setTitle(`${n} px`)
+        .setChecked(item.size === n)
+        .onClick(() => this.canvas?.setItemSize(item.id, n)));
+    }
+    menu.addItem((it: MenuItem) => it
+      .setSection('Text size')
+      .setTitle('Custom…')
+      .onClick(() => void this.pickCustomLabelSize(item.id)));
+
+    // Reordering is the only way to reach a label sitting under another, so it belongs in the label
+    // menu rather than behind an undiscoverable gesture.
+    menu.addSeparator();
+    const atFront = this.chart.items[this.chart.items.length - 1]?.id === item.id;
+    const atBack = this.chart.items[0]?.id === item.id;
+    const onlyOne = this.chart.items.length < 2;
+    menu.addItem((it: MenuItem) => it
+      .setSection('Overlapping labels')
+      .setTitle('Bring to front')
+      .setDisabled(onlyOne || atFront)
+      .onClick(() => this.canvas?.reorderItem(item.id, 'front')));
+    menu.addItem((it: MenuItem) => it
+      .setSection('Overlapping labels')
+      .setTitle('Send to back')
+      .setDisabled(onlyOne || atBack)
+      .onClick(() => this.canvas?.reorderItem(item.id, 'back')));
+
     menu.showAtMouseEvent(e);
+  }
+
+  private async pickCustomLabelSize(id: string): Promise<void> {
+    const existing = this.chart.items.find((i) => i.id === id);
+    if (!existing) return;
+    const effective = existing.size ?? this.chart.baseFontSize ?? DEFAULTS.baseFontSize;
+    const raw = await this.plugin.promptText(String(effective), 'Text size in pixels (8-96)');
+    if (raw === null) return;
+    const n = Number(raw.trim());
+    if (!Number.isFinite(n)) {
+      new Notice('Enter a number of pixels, e.g. "18".');
+      return;
+    }
+    this.canvas?.setItemSize(id, n);
   }
 
   /** Apply (or clear) a label's background plate. `hex === null` removes the plate only. */
@@ -579,6 +631,14 @@ export class QuadrantChartView extends FileView {
     this.renderToolbar();
   }
 }
+
+/**
+ * Font-size steps offered in the label menu.
+ *
+ * Spaced so each is visibly distinct from its neighbour at a glance, which is the whole point of
+ * offering fixed steps rather than a number field. Bracketed by the model's own limits.
+ */
+const LABEL_SIZES = [8, 11, 14, 18, 24, 32, 48];
 
 /** Short enough for a toolbar button; the full text is still visible in the context menu. */
 function truncate(text: string, max = 14): string {

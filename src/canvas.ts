@@ -217,6 +217,13 @@ export class ChartCanvas {
     this.render();
   }
 
+  /** Select a label and log it. The single place the item-selection branch ends up. */
+  private selectItem(id: string): void {
+    this.selectedItem = id;
+    this.selected = null;
+    this.render();
+  }
+
   /** The cell actions apply to: the one the user clicked, else the middle of the grid. */
   effectiveCell(): { col: number; row: number } {
     if (this.selected) return this.selected;
@@ -427,7 +434,14 @@ export class ChartCanvas {
 
   // ── interaction ───────────────────────────────────────────────────────────
 
-  private svgPoint(evt: PointerEvent): { x: number; y: number } {
+  /**
+ * Client coordinates mapped into SVG user units.
+ *
+ * Typed to the only two fields actually read, so it serves both the pointer and the mouse events
+ * that reach this widget — `click` and `contextmenu` are MouseEvents, `pointerdown`/`move` are
+ * PointerEvents, and they all need the same conversion.
+ */
+private svgPoint(evt: { clientX: number; clientY: number }): { x: number; y: number } {
     const box = this.svg.getBoundingClientRect();
     // The viewBox is 1:1 with width/height, so client deltas map straight to user units. Dividing by
     // the box keeps this correct if the pane is ever CSS-scaled.
@@ -561,9 +575,21 @@ export class ChartCanvas {
 
     const itemId = target.closest?.('.qc-item')?.getAttribute('data-item-id');
     if (itemId) {
-      this.selectedItem = itemId;
-      this.selected = null;
-      this.render();
+      // Overlapping labels: a pointer event only ever reports the TOPMOST one, so a label under
+      // another is unreachable by clicking alone. Clicking the same spot again steps down through
+      // the stack — which is why the position is taken from what is ALREADY selected rather than
+      // from what was clicked. The clicked target is always the top one, so using it would never
+      // advance past it.
+      const p = this.svgPoint(evt);
+      const stack = this.labelsAt(p.x, p.y);
+      if (stack.length > 1) {
+        const current = stack.findIndex((i) => i.id === this.selectedItem);
+        if (current >= 0) {
+          this.selectItem(stack[(current + 1) % stack.length].id);
+          return;
+        }
+      }
+      this.selectItem(itemId);
       return;
     }
 
@@ -651,6 +677,81 @@ export class ChartCanvas {
     this.chart = { ...this.chart, title: t || undefined };
     this.render();
     this.cb.onChange(this.chart);
+  }
+
+  /** Set (or clear, with null) a label's font size. Null means "inherit the chart's base size". */
+  setItemSize(id: string, size: number | null): void {
+    const item = this.chart.items.find((i) => i.id === id);
+    if (!item) return;
+    const next = size === null
+      ? undefined
+      : clampNum(Math.round(size), LIMITS.minFontSize, LIMITS.maxFontSize, DEFAULTS.baseFontSize);
+    // Setting the size it already has is not a change, so it must not push an undo snapshot.
+    if ((item.size ?? undefined) === next) return;
+    this.pushUndo();
+    this.chart = {
+      ...this.chart,
+      items: this.chart.items.map((i) => (i.id === id ? { ...i, size: next } : i)),
+    };
+    this.render();
+    this.cb.onChange(this.chart);
+  }
+
+  /**
+   * Move a label to the front of the paint order, or the back.
+   *
+   * Paint order is the array order in the file, which is why this is a content change and not a
+   * view setting: two labels at the same coordinates are indistinguishable in the file except by
+   * which comes first, so reordering is the only way to bring the lower one out from under.
+   */
+  reorderItem(id: string, to: 'front' | 'back'): void {
+    const from = this.chart.items.findIndex((i) => i.id === id);
+    if (from === -1) return;
+    const items = [...this.chart.items];
+    const [moved] = items.splice(from, 1);
+    if (to === 'front') items.push(moved);
+    else items.unshift(moved);
+    // Already at that end, or it is the only label: nothing to change, so nothing to undo.
+    if (items[to === 'front' ? items.length - 1 : 0] === moved && from === (to === 'front' ? items.length - 1 : 0)) {
+      return;
+    }
+    this.pushUndo();
+    this.chart = { ...this.chart, items };
+    this.render();
+    this.cb.onChange(this.chart);
+  }
+
+  /**
+   * Every label whose hit plate covers a screen point, topmost first.
+   *
+   * Computed geometrically rather than read from DOM targets, because a click only ever reports the
+   * topmost element — which is exactly the label the user cannot otherwise reach. Anything beneath it
+   * is unreachable by any pointer event, so it has to be worked out from the geometry.
+   */
+  labelsAt(px: number, py: number): Item[] {
+    const chart = this.getChart();
+    const hits: Item[] = [];
+    for (const item of chart.items) {
+      const r = this.itemHitRect(item, chart);
+      if (px >= r.x && px <= r.x + r.width && py >= r.y && py <= r.y + r.height) hits.push(item);
+    }
+    // Later in the array is painted later, so it is on top. Reverse to get topmost first.
+    return hits.reverse();
+  }
+
+  /** The screen box of a label's click target — shared by hit testing and overlap detection. */
+  private itemHitRect(item: Item, chart: Chart): { x: number; y: number; width: number; height: number } {
+    const fontSize = clampNum(
+      item.size ?? chart.baseFontSize ?? DEFAULTS.baseFontSize,
+      LIMITS.minFontSize, LIMITS.maxFontSize, DEFAULTS.baseFontSize,
+    );
+    const width = estimateTextWidth(item.text, fontSize);
+    return {
+      x: dataToScreenX(item.x, chart.x, this.plot) - width / 2,
+      y: dataToScreenY(item.y, chart.y, this.plot) - fontSize - 3,
+      width,
+      height: fontSize + 9,
+    };
   }
 
   /** Delete a label by id, clearing the selection if it was the one removed. */

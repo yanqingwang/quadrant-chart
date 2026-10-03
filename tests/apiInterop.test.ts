@@ -109,6 +109,63 @@ describe('files written by Script/mdx_chart.py are readable by the plugin', () =
     expect(c.items[1].box).toBeUndefined();
   });
 
+  it('carries a label font size written by the script', () => {
+    // `size` was in the format from the start with no UI able to set it, so it was a field only the
+    // script could use. The UI can set it now; the test pins that both paths produce the same file.
+    const p = path.join(dir, 'sized.mdx');
+    run('create', '--path', p)
+    run('add-item', '--path', p, '--text', 'Big heading', '--x', '5', '--y', '5', '--size', '32')
+    const c = parseChartFromText(fs.readFileSync(p, 'utf8'))!;
+    expect(c.items[0].size).toBe(32);
+    expect(fs.readFileSync(p, 'utf8')).toContain('size: 32');
+  });
+
+  it('clamps an out-of-range size rather than writing an unusable one', () => {
+    const p = path.join(dir, 'clamped.mdx');
+    run('create', '--path', p)
+    run('add-item', '--path', p, '--text', 'Huge', '--x', '5', '--y', '5', '--size', '9999')
+    const c = parseChartFromText(fs.readFileSync(p, 'utf8'))!;
+    expect(c.items[0].size).toBe(96);            // the plugin's own maximum
+  });
+
+  it('honours a paint-order change made by the script', () => {
+    // Order is content: two labels at the same coordinates differ only by which comes first, so the
+    // plugin must read the script's reordering as meaning something.
+    const p = path.join(dir, 'ordered.mdx');
+    run('create', '--path', p)
+    run('add-item', '--path', p, '--text', 'Beneath', '--x', '5', '--y', '5')
+    run('add-item', '--path', p, '--text', 'Above', '--x', '5', '--y', '5')
+    const before = parseChartFromText(fs.readFileSync(p, 'utf8'))!.items.map((i) => i.text);
+    expect(before).toEqual(['Beneath', 'Above']);
+
+    const ids = parseChartFromText(fs.readFileSync(p, 'utf8'))!.items.map((i) => i.id);
+    run('reorder-item', '--path', p, '--id', ids[0], '--to', 'front');
+    const after = parseChartFromText(fs.readFileSync(p, 'utf8'))!.items.map((i) => i.text);
+    expect(after).toEqual(['Above', 'Beneath']);
+  });
+
+  it('reports an unknown label id instead of silently doing nothing', () => {
+    const p = path.join(dir, 'missing.mdx');
+    run('create', '--path', p)
+    run('add-item', '--path', p, '--text', 'Only one', '--x', '5', '--y', '5')
+    const before = fs.readFileSync(p, 'utf8');
+    expect(() => run('set-item-size', '--path', p, '--id', 'nope', '--size', '20')).toThrow();
+    expect(() => run('reorder-item', '--path', p, '--id', 'nope')).toThrow();
+    // A failed command must not have written anything.
+    expect(fs.readFileSync(p, 'utf8')).toBe(before);
+  });
+
+  it('clears a size override when none is given', () => {
+    const p = path.join(dir, 'cleared.mdx');
+    run('create', '--path', p)
+    run('add-item', '--path', p, '--text', 'Resized', '--x', '5', '--y', '5', '--size', '30')
+    run('set-item-size', '--path', p, '--id',
+      JSON.parse(run('show', '--path', p)).items[0].id);
+    const c = parseChartFromText(fs.readFileSync(p, 'utf8'))!;
+    expect(c.items[0].size).toBeUndefined();
+    expect(fs.readFileSync(p, 'utf8')).not.toContain('size:');
+  });
+
   it('refuses to touch a file that is not a chart', () => {
     const p = path.join(dir, 'other.mdx');
     fs.writeFileSync(p, '---\ntitle: not a chart\n---\n\nbody\n', 'utf8');

@@ -77,7 +77,8 @@ Everything below the frontmatter is never touched by the plugin or the script.
 | `items[].color` | `#rrggbb` | no | Label colour; defaults to the theme's text colour. |
 | `items[].background` | `#rrggbb` | no | Plate drawn behind the text. Omitted when unset. |
 | `items[].box` | boolean | no | Outline around the label. **Written only when `true`** — `box: false` is not stored, to keep diffs quiet. Only a real boolean is read; a quoted `"false"` string is ignored rather than being treated as truthy. |
-| `items[].size` | int | no | Font size in px (8–96). |
+| `items[].size` | int | no | Font size in px (8–96). Omitted means "use `base-font-size`". |
+| items order | — | — | **Paint order.** Later entries are drawn on top, so two labels at the same coordinate are distinguished only by which comes first. Reordering is a content change, not a view setting. |
 | `base-font-size` | int | no | Default label size; omitted when 14. |
 
 ---
@@ -150,6 +151,9 @@ print(chart.quadrant_of(-3.4, 4.2))   # (0, 1)
 | `Axis(label, minimum, maximum, ticks=None)` | One axis. |
 | `chart.add_cell(col, row, label=None, color=None, note=None)` | Create/replace a cell. **Raises** if the address is outside the grid. |
 | `chart.add_item(text, x, y, color=None, size=None, item_id=None, background=None, box=None)` | Add a label. Out-of-range coords are clamped with a warning on stderr. **Raises** on empty text or duplicate `item_id`. |
+| `chart.set_item_size(item_id, size)` | Set (or with `None` clear) one label's font size. Clamped to 8–96. Raises `KeyError` on an unknown id rather than doing nothing. |
+| `chart.bring_to_front(item_id)` | Move a label to the top of the paint order. |
+| `chart.send_to_back(item_id)` | Move a label to the bottom of the paint order. |
 | `chart.remove_item(needle)` | Delete by substring. Returns `bool`. |
 | `chart.set_grid(columns, rows)` | Resize; drops cells that fall outside. |
 | `chart.quadrant_of(x, y)` | Which cell contains a point. |
@@ -185,6 +189,13 @@ python3 Script/mdx_chart.py add-item --path Q1.mdx --text "Rework sync engine" -
 # ... with a background plate and an outline (palette name or hex)
 python3 Script/mdx_chart.py add-item --path Q1.mdx --text "Highest risk" --x 8 --y 1 \
     --background red --box
+
+# Resize one label by id (omit --size to clear the override)
+python3 Script/mdx_chart.py set-item-size --path Q1.mdx --id i1a2b3c4 --size 32
+python3 Script/mdx_chart.py set-item-size --path Q1.mdx --id i1a2b3c4
+
+# Two labels at the same spot: order decides which is visible
+python3 Script/mdx_chart.py reorder-item --path Q1.mdx --id i1a2b3c4 --to front
 
 # Name and colour a cell
 python3 Script/mdx_chart.py set-cell --path Q1.mdx --col 1 --row 1 --label "Do now" --color red
@@ -249,6 +260,22 @@ c.add_cell(0, 0, "Weaknesses", color="red");   c.add_cell(1, 0, "Threats", color
 ```
 
 A worked example: `/home/wang/wk/wk/SWOT-插件价值.mdx`.
+
+### Overlapping labels
+
+Later entries in `items` are painted on top. Two labels at the same coordinate are therefore identical
+in the file except for their order — and a pointer event only ever reports the topmost one, so the
+lower label is otherwise unreachable:
+
+```python
+c.add_item("Beneath", x=5, y=5, item_id="under")
+c.add_item("Above",  x=5, y=5, item_id="over")
+c.bring_to_front("under")     # now "under" is the one a first click reaches
+c.send_to_back("under")       # and back again
+```
+
+In the plugin, clicking the same spot repeatedly also steps down the stack, so the label underneath
+can be reached without reordering anything.
 
 ### Any other N×M
 
