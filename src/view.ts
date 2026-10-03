@@ -87,6 +87,22 @@ export class QuadrantChartView extends FileView {
    * chart view is focused, which reads as the keyboard being broken rather than as a missing feature.
    */
   private onKeyDown = (evt: KeyboardEvent): void => {
+    // Delete / Backspace removes the selected label. This is a third, independent route to the same
+    // action, and the only one that needs neither a right-click nor a menu: the context menu event
+    // is the one thing a host application can swallow, so a single path through it is a single point
+    // of failure.
+    if (evt.key === 'Delete' || evt.key === 'Backspace') {
+      // Never while typing: an input inside the view owns these keys.
+      const t = evt.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const id = this.canvas?.getSelectedItem() ?? null;
+      if (!id) return;
+      evt.preventDefault();
+      this.canvas?.removeItem(id);
+      this.chart = this.canvas?.getChart() ?? this.chart;
+      this.renderToolbar();
+      return;
+    }
     if (!(evt.ctrlKey || evt.metaKey)) return;
     const key = evt.key.toLowerCase();
 
@@ -176,6 +192,10 @@ export class QuadrantChartView extends FileView {
       // Repaint the toolbar so the Cell button names the cell the user just clicked. Without this
       // the button would keep saying "the middle one" while the highlight was somewhere else.
       onSelectCell: () => this.renderToolbar(),
+      // The Label button names the selected label, so it must be rebuilt whenever that changes.
+      // Without this the button kept saying "Label" after a click, and the menu it opened offered
+      // no way to delete — the step that had to happen first was invisible.
+      onSelectLabel: () => this.renderToolbar(),
     });
   }
 
@@ -204,7 +224,9 @@ export class QuadrantChartView extends FileView {
     const selected = this.canvas?.getSelectedItem() ?? null;
     const chosen = selected ? this.chart.items.find((i) => i.id === selected) : undefined;
     this.button(bar, chosen ? `Label "${truncate(chosen.text)}"` : 'Label', 'tag',
-      chosen ? 'Edit, colour, outline or delete the selected label' : 'Click a label on the chart, then use this to edit or style it',
+      chosen
+        ? 'Edit, colour, outline or delete this label'
+        : 'Click a label on the chart first — this button acts on the label you select',
       (e) => this.pickLabel(e));
     this.button(bar, 'Axes', 'axis', 'Rename the axes and set their ranges', (e) => this.pickAxes(e));
     this.button(bar, 'Title', 'type', 'Set the chart title', () => void this.promptTitle());
@@ -227,7 +249,8 @@ export class QuadrantChartView extends FileView {
     if (!item) {
       menu.addItem((it: MenuItem) => it
         .setSection('No label selected')
-        .setTitle('Click a label on the chart to select it')
+        // This Obsidian version's MenuItem has no setDesc, so the guidance goes in the title.
+        .setTitle('Click a label on the chart to select it (then this menu can delete it)')
         .setDisabled(true));
       menu.showAtMouseEvent(e);
       return;

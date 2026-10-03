@@ -36,6 +36,15 @@ export interface CanvasCallbacks {
   file: TFile;
   /** Called when the user clicks a cell, so the toolbar can act on the chosen one. */
   onSelectCell?(col: number, row: number): void;
+  /**
+   * Called when the selected LABEL changes, so the toolbar can show which one is selected.
+   *
+   * Without this the Label button is a dead end that looks identical whether or not anything is
+   * selected. A user who adds a label, then opens the menu without first clicking the label, gets
+   * only a disabled "click a label to select it" row and no delete — which reads as "deleting is
+   * broken" rather than as "you skipped a step".
+   */
+  onSelectLabel?(id: string | null): void;
 }
 
 export class ChartCanvas {
@@ -266,16 +275,19 @@ export class ChartCanvas {
 
   /** Select a label by id, clearing the cell selection. Passing null clears the label selection. */
   setSelectedItem(id: string | null): void {
+    if (this.selectedItem === id) return;
     this.selectedItem = id;
     if (id) this.selected = null;
     this.render();
+    this.cb.onSelectLabel?.(id);
   }
 
-  /** Select a label and log it. The single place the item-selection branch ends up. */
+  /** Select a label. The single place the item-selection branch ends up. */
   private selectItem(id: string): void {
     this.selectedItem = id;
     this.selected = null;
     this.render();
+    this.cb.onSelectLabel?.(id);
   }
 
   /** The cell actions apply to: the one the user clicked, else the middle of the grid. */
@@ -673,11 +685,9 @@ private svgPoint(evt: { clientX: number; clientY: number }): { x: number; y: num
     const id = target.closest?.('.qc-item')?.getAttribute('data-item-id');
     if (!id) return;
     evt.preventDefault();
+    // removeItem already snapshots, redraws, saves and notifies the toolbar. Repeating any of that
+    // here meant one right-click cost two writes and TWO undo steps to walk back.
     this.removeItem(id);
-    // A selection box drawn around a label that no longer exists would frame empty space.
-    if (this.selectedItem === id) this.selectedItem = null;
-    this.render();
-    this.cb.onChange(this.chart);
   };
 
   // ── mutations exposed to the host (toolbar, commands) ─────────────────────
@@ -813,7 +823,11 @@ private svgPoint(evt: { clientX: number; clientY: number }): { x: number; y: num
     if (!this.chart.items.some((i) => i.id === id)) return;
     this.pushUndo();
     this.chart = { ...this.chart, items: this.chart.items.filter((i) => i.id !== id) };
-    if (this.selectedItem === id) this.selectedItem = null;
+    if (this.selectedItem === id) {
+      this.selectedItem = null;
+      // The toolbar names the selected label, so it has to hear that the name is gone.
+      this.cb.onSelectLabel?.(null);
+    }
     this.render();
     this.cb.onChange(this.chart);
   }
