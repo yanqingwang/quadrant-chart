@@ -110,6 +110,15 @@ class ItemView {
   getDisplayText() { return ''; }
   getIcon() { return 'document'; }
   getState() { return {}; }
+  /**
+   * Obsidian's Component.registerDomEvent: attaches a listener and remembers it for cleanup on
+   * unload. Modelled as a plain addEventListener, which is what it does.
+   */
+  registerDomEvent(el, type, handler) {
+    el.addEventListener(type, handler);
+    (this.__domEvents = this.__domEvents || []).push([el, type, handler]);
+    return handler;
+  }
   onOpen() {}
   onClose() {}
 }

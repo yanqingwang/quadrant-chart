@@ -93,6 +93,22 @@ describe('files written by Script/mdx_chart.py are readable by the plugin', () =
     expect(parseChartFromText(fs.readFileSync(p, 'utf8'))!.title).toBe('Replaced');
   });
 
+  it('carries label styling written by the script', () => {
+    // background and box were added to both implementations independently. If either side had been
+    // missed, the field would be dropped on the next save from the plugin — the failure being that
+    // the styling silently disappears, not an error.
+    const p = path.join(dir, 'styled.mdx');
+    run('create', '--path', p)
+    run('add-item', '--path', p, '--text', 'highlighted', '--x', '5', '--y', '5',
+        '--background', 'yellow', '--box')
+    run('add-item', '--path', p, '--text', 'plain', '--x', '1', '--y', '1')
+    const c = parseChartFromText(fs.readFileSync(p, 'utf8'))!;
+    expect(c.items[0].background).toBe('#fdd663');   // palette name resolved
+    expect(c.items[0].box).toBe(true);
+    expect(c.items[1].background).toBeUndefined();
+    expect(c.items[1].box).toBeUndefined();
+  });
+
   it('refuses to touch a file that is not a chart', () => {
     const p = path.join(dir, 'other.mdx');
     fs.writeFileSync(p, '---\ntitle: not a chart\n---\n\nbody\n', 'utf8');

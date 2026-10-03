@@ -8,14 +8,14 @@
  * showing numbers the file no longer contains.
  */
 
-import { FileView, Menu, Notice, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
+import { FileView, Menu, MenuItem, Notice, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
 import QuadrantChartPlugin from './main';
-import { Chart, Cell, createChart, LIMITS, DEFAULTS } from './model';
+import { Chart, Cell, Item, createChart, LIMITS, DEFAULTS } from './model';
 import { readChart, writeChart } from './mdx';
 import { ChartCanvas } from './canvas';
-import { diag } from './diag';
 import { PALETTE, promptColor, sameColor } from './colorUi';
 import { findCell } from './geometry';
+import { ImageKind, exportChartImage, resolveExportTheme } from './exportImage';
 
 export const VIEW_TYPE_QUADRANT = 'quadrant-chart-view';
 
@@ -69,20 +69,45 @@ export class QuadrantChartView extends FileView {
   // matters — getState here, onLoadFile below — is what makes the binding survive a reload.
 
   async onOpen(): Promise<void> {
-    await diag(this.app, 'onOpen (file not yet assigned by Obsidian)');
     // Chrome only. `this.file` is still null at this point — Obsidian assigns it afterwards and
     // then calls onLoadFile. Loading the chart here silently did nothing, which left the canvas
     // showing a default chart and made every write a no-op.
     this.buildChrome();
     this.stopResize = this.canvas?.observeResize() ?? null;
+    this.registerDomEvent(this.contentEl, 'keydown', this.onKeyDown);
   }
+
+  /**
+   * Ctrl/Cmd+Z.
+   *
+   * Obsidian's own undo stack covers the markdown editor, which a canvas edit never touches — the
+   * plugin writes the file directly. Without this, the standard undo shortcut does nothing while the
+   * chart view is focused, which reads as the keyboard being broken rather than as a missing feature.
+   */
+  private onKeyDown = (evt: KeyboardEvent): void => {
+    if (!(evt.ctrlKey || evt.metaKey) || evt.key.toLowerCase() !== 'z') return;
+    evt.preventDefault();
+    evt.stopPropagation();
+    if (evt.shiftKey) {
+      // Redo is deliberately not offered: a snapshot stack holds states, not operations, so replaying
+      // forward would need a second stack. Saying so beats a shortcut that silently does nothing.
+      new Notice('Redo is not available — undo steps back one change at a time.');
+      return;
+    }
+    if (!this.canvas?.canUndo()) {
+      new Notice('Nothing to undo');
+      return;
+    }
+    this.canvas.undo();
+    this.chart = this.canvas.getChart();
+    this.renderToolbar();
+  };
 
   /**
    * The file has been assigned. This is the first moment `this.file` is valid, so it is where the
    * chart must be read from disk.
    */
   async onLoadFile(file: TFile): Promise<void> {
-    await diag(this.app, `onLoadFile ${file.path}`);
     await this.reload();
   }
 
@@ -105,7 +130,6 @@ export class QuadrantChartView extends FileView {
     const file = this.file;
     if (!file) return;
     const loaded = await readChart(this.app, file);
-    await diag(this.app, `reload ${file.path} parsed=${loaded ? 'yes' : 'NO (not a chart)'} items=${loaded?.items.length ?? '-'}`);
     if (!loaded) {
       // Surface it in the canvas area rather than emptying the view, so the toolbar and the reason
       // are both visible.
@@ -115,6 +139,9 @@ export class QuadrantChartView extends FileView {
     }
     this.chart = loaded;
     this.canvas?.setChart(loaded);
+    // The newly opened file has its own history. Carrying the previous file's snapshots over would
+    // let undo restore the previous chart's contents into this one.
+    this.canvas?.clearUndo();
     this.renderToolbar();
   }
 
@@ -165,8 +192,114 @@ export class QuadrantChartView extends FileView {
     this.button(bar, `Grid ${this.chart.grid.columns}×${this.chart.grid.rows}`, 'layout-grid',
       'Change how many columns and rows the plot is divided into', (e) => this.pickGrid(e));
     this.button(bar, 'Cell', 'square', 'Name and colour the cell in the middle of the plot', (e) => this.pickCell(e));
+    // The Label button only acts on something once one is selected, so its label says which state it
+    // is in rather than leaving the user to guess whether a click registered.
+    const selected = this.canvas?.getSelectedItem() ?? null;
+    const chosen = selected ? this.chart.items.find((i) => i.id === selected) : undefined;
+    this.button(bar, chosen ? `Label "${truncate(chosen.text)}"` : 'Label', 'tag',
+      chosen ? 'Edit, colour, outline or delete the selected label' : 'Click a label on the chart, then use this to edit or style it',
+      (e) => this.pickLabel(e));
     this.button(bar, 'Axes', 'axis', 'Rename the axes and set their ranges', (e) => this.pickAxes(e));
     this.button(bar, 'Title', 'type', 'Set the chart title', () => void this.promptTitle());
+    this.button(bar, 'Export', 'image-file', 'Save the chart as an image file', (e) => this.plugin.pickExport(e));
+  }
+
+  /**
+   * Actions on the selected label.
+   *
+   * Reachable from the toolbar once a label is clicked, and from the context menu on any label
+   * (which selects it first). Everything a label supports lives here rather than being spread across
+   * gestures, because the gestures available differ by device: double-click to edit works with a
+   * mouse but is awkward on a phone, where a right-click does not exist at all.
+   */
+  private pickLabel(e: MouseEvent): void {
+    const id = this.canvas?.getSelectedItem() ?? null;
+    const item = id ? this.chart.items.find((i) => i.id === id) : undefined;
+    const menu = new Menu();
+
+    if (!item) {
+      menu.addItem((it: MenuItem) => it
+        .setSection('No label selected')
+        .setTitle('Click a label on the chart to select it')
+        .setDisabled(true));
+      menu.showAtMouseEvent(e);
+      return;
+    }
+
+    menu.addItem((it: MenuItem) => it
+      .setSection(`Label — "${truncate(item.text)}"`)
+      .setTitle('Edit text…')
+      .onClick(() => void this.canvas?.renameItem(item)));
+    menu.addItem((it: MenuItem) => it
+      .setSection(`Label — "${truncate(item.text)}"`)
+      .setTitle('Delete label')
+      .onClick(() => this.canvas?.removeItem(item.id)));
+
+    menu.addSeparator();
+    for (const sw of PALETTE) {
+      menu.addItem((it: MenuItem) => it
+        .setSection('Background colour')
+        .setTitle(sw.name)
+        .setChecked(sameColor(item.background, sw.hex))
+        .onClick(() => this.setLabelBackground(item.id, sw.hex)));
+    }
+    menu.addItem((it: MenuItem) => it
+      .setSection('Background colour')
+      .setTitle('Custom colour…')
+      .onClick(() => void this.pickCustomLabelBackground(item.id)));
+    if (item.background) {
+      menu.addItem((it: MenuItem) => it
+        .setSection('Background colour')
+        .setTitle('Remove background')
+        .onClick(() => this.setLabelBackground(item.id, null)));
+    }
+
+    menu.addSeparator();
+    menu.addItem((it: MenuItem) => it
+      .setSection('Border')
+      .setTitle('Draw a box around it')
+      .setChecked(item.box === true)
+      .onClick(() => this.setLabelBox(item.id, item.box !== true)));
+
+    menu.showAtMouseEvent(e);
+  }
+
+  /** Apply (or clear) a label's background plate. `hex === null` removes the plate only. */
+  private setLabelBackground(id: string, hex: string | null): void {
+    const items = this.chart.items.map((i) => (i.id === id ? { ...i, background: hex ?? undefined } : i));
+    this.chart = { ...this.chart, items };
+    this.canvas?.setChart(this.chart);
+    this.renderToolbar();
+    void this.commit(this.chart);
+  }
+
+  private async pickCustomLabelBackground(id: string): Promise<void> {
+    const existing = this.chart.items.find((i) => i.id === id);
+    if (!existing) return;
+    const picked = await promptColor(this.app, 'Label background colour', existing.background ?? null);
+    if (picked === null) return;
+    this.setLabelBackground(id, picked === '' ? null : picked);
+  }
+
+  /** Toggle the outline around a label. */
+  private setLabelBox(id: string, on: boolean): void {
+    const items = this.chart.items.map((i) => (i.id === id ? { ...i, box: on } : i));
+    this.chart = { ...this.chart, items };
+    this.canvas?.setChart(this.chart);
+    this.renderToolbar();
+    void this.commit(this.chart);
+  }
+
+  /**
+   * Render and save the chart as an image file.
+   *
+   * The theme is read from the live canvas element rather than hard-coded, so an export matches the
+   * light or dark mode the user is actually looking at instead of assuming white.
+   */
+  async exportImage(kind: ImageKind): Promise<TFile> {
+    const theme = resolveExportTheme(this.contentEl);
+    if (!this.file) throw new Error('this view is not bound to a file');
+    return exportChartImage(this.app, this.chart, this.file, kind, theme);
   }
 
   private button(parent: HTMLElement, label: string, icon: string, title: string, onClick: (e: MouseEvent) => void): void {
@@ -361,10 +494,8 @@ export class QuadrantChartView extends FileView {
   }
 
   private async editCellNote(col: number, row: number): Promise<void> {
-    await diag(this.app, `editCellNote ${col},${row}`);
     const existing = findCell(this.chart, col, row);
     const note = await this.plugin.promptText(existing?.note ?? '', `Note for cell ${col + 1},${row + 1}`);
-    await diag(this.app, `editCellNote prompt returned ${note === null ? 'CANCEL' : JSON.stringify(note)}`);
     if (note === null) return;
     const others = this.chart.cells.filter((c) => !(c.col === col && c.row === row));
     const t = note.trim();
@@ -407,7 +538,6 @@ export class QuadrantChartView extends FileView {
     // Logged FIRST, before any branch. "The save path was never entered" and "it was entered but had
     // no file" must be distinguishable, and an earlier version logged only after the null check — so
     // the most likely failure produced no log at all, which is indistinguishable from a silent no-op.
-    await diag(this.app, `commit ENTERED items=${chart.items.length} file=${file ? file.path : 'NULL'}`);
     if (!file) {
       console.error('[quadrant-chart] refusing to save: the view has no file bound');
       this.showMessage('Not saving: this view is not bound to a file. Reopen the .mdx file from the vault.');
@@ -417,9 +547,7 @@ export class QuadrantChartView extends FileView {
     this.writeChain = this.writeChain.then(async () => {
       try {
         await writeChart(this.app, file, chart);
-        await diag(this.app, `commit DONE items=${chart.items.length}`);
       } catch (err) {
-        await diag(this.app, `commit FAILED ${(err as Error).message}`);
         new Notice(`Could not save the chart: ${(err as Error).message}`);
       }
     });
@@ -445,8 +573,17 @@ export class QuadrantChartView extends FileView {
     if (chartsEqual(loaded, this.chart)) return; // our own write coming back around
     this.chart = loaded;
     this.canvas?.setChart(loaded);
+    // The newly opened file has its own history. Carrying the previous file's snapshots over would
+    // let undo restore the previous chart's contents into this one.
+    this.canvas?.clearUndo();
     this.renderToolbar();
   }
+}
+
+/** Short enough for a toolbar button; the full text is still visible in the context menu. */
+function truncate(text: string, max = 14): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  return clean.length <= max ? clean : `${clean.slice(0, max - 1)}…`;
 }
 
 /** Structural equality for two charts, used to decide whether a reload has anything to apply. */

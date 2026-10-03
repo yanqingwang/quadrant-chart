@@ -176,8 +176,44 @@
   stroke-linejoin: round;
 }
 
+/* The click target for a label, sized to the text. `pointer-events: all` is required rather than
+   relying on the default `visiblePainted`: a fully transparent fill is not reliably treated as
+   painted, so without it the plate swallows nothing and the click falls through to the cell
+   underneath — which is why clicking a label used to select the cell. */
 .qc-item-hit {
   fill: transparent;
+  pointer-events: all;
+}
+
+/* The box drawn around the selected label. Drawn behind the text, so it frames rather than covers,
+   and shares the dashed accent language of the selected-cell outline so the two read as the same
+   kind of thing. */
+.qc-item-selected {
+  fill: none;
+  stroke: var(--interactive-accent);
+  stroke-width: 2;
+  stroke-dasharray: 5 3;
+  pointer-events: none;
+}
+
+.qc-item.qc-selected .qc-item-text {
+  stroke: var(--background-primary);
+  stroke-width: 4;
+}
+
+/* The author's own border on a label. Solid rather than dashed, so it does not read as the same
+   thing as the transient selection indicator drawn over it. */
+.qc-item-box {
+  fill: none;
+  stroke: var(--text-normal);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+/* The author's background plate. pointer-events:none so it never becomes the click target — the
+   hit plate and the text are the targets, and both sit above it. */
+.qc-item-bg {
+  pointer-events: none;
 }
 
 /* ── in-place editable text (axis labels, title) ─────────────────────────── */

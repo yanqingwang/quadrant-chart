@@ -12,11 +12,10 @@
  */
 
 import { App, TFile } from 'obsidian';
-import { diag } from './diag';
-import { Chart, Item, LIMITS, DEFAULTS, clampNum } from './model';
+import { Axis, Chart, Item, LIMITS, DEFAULTS, clampNum, normalizeChart } from './model';
 import {
   Margins, PlotRect, DEFAULT_MARGINS,
-  axisTicks, cellRect, dataToScreenX, dataToScreenY, findCell, formatTick,
+  axisTicks, cellCentre, cellRect, dataToScreenX, dataToScreenY, findCell, formatTick,
   screenToDataX, screenToDataY, splitPositions,
 } from './geometry';
 
@@ -48,6 +47,28 @@ export class ChartCanvas {
   private draft: Chart | null = null;
   /** The cell the user last clicked. Null means "none chosen"; the view falls back to the middle. */
   private selected: { col: number; row: number } | null = null;
+  /**
+   * The label the user last clicked.
+   *
+   * Separate from `selected` because the two are not interchangeable: a label sits on top of a cell,
+   * and "which label" and "which cell" are different questions. Clicking a label selects the label
+   * and clears the cell, because a click that lands on text means the text.
+   */
+  private selectedItem: string | null = null;
+  /**
+   * Snapshots of the chart as it was BEFORE each committed change.
+   *
+   * Canvas edits bypass Obsidian's undo stack entirely — they never go through the editor — so an
+   * accidental drag had no recovery route at all except hand-editing the YAML. A snapshot per change
+   * is cheap (a chart is a few hundred bytes as JSON) and cannot be wrong about which fields a
+   * partial gesture touched, which is where a diff-based undo would be fragile.
+   *
+   * Bounded, because a long editing session would otherwise grow it without limit. The cap is
+   * deliberately generous: past a few dozen steps nobody reaches back, and holding more costs memory
+   * nobody benefits from.
+   */
+  private undoStack: string[] = [];
+  private static readonly UNDO_LIMIT = 100;
   private resizeObserver: ResizeObserver | null = null;
 
   constructor(
@@ -74,6 +95,65 @@ export class ChartCanvas {
     this.chart = chart;
     this.draft = null;
     this.render();
+  }
+
+  // ── undo ────────────────────────────────────────────────────────────────────
+
+  /**
+   * Record the current chart so `undo()` can return to it.
+   *
+   * Called BEFORE a change is applied, and only when one is actually about to happen. A snapshot
+   * taken after the change would restore the change rather than undo it, and one taken for a no-op
+   * would make undo appear to work while doing nothing.
+   */
+  pushUndo(): void {
+    this.undoStack.push(JSON.stringify(this.chart));
+    if (this.undoStack.length > ChartCanvas.UNDO_LIMIT) this.undoStack.shift();
+  }
+
+  /**
+   * Step back one change. Returns false when there is nothing to undo.
+   *
+   * Undoing does not push a snapshot, so the stack drains one step per press instead of ping-ponging
+   * between two states, and a fresh change after an undo discards the redo branch.
+   */
+  undo(): boolean {
+    const prev = this.undoStack.pop();
+    if (prev === undefined) return false;
+    let parsed: Chart | null = null;
+    try {
+      parsed = JSON.parse(prev) as Chart;
+    } catch {
+      // A snapshot we wrote ourselves, so this should never happen. Returning false is honest;
+      // silently restoring nothing would be the worse failure.
+      return false;
+    }
+    this.chart = normalizeChart(parsed as unknown as Record<string, unknown>);
+    this.draft = null;
+    // A selection can name something the restored chart no longer contains.
+    if (this.selectedItem && !this.chart.items.some((i) => i.id === this.selectedItem)) {
+      this.selectedItem = null;
+    }
+    if (this.selected
+      && (this.selected.col >= this.chart.grid.columns || this.selected.row >= this.chart.grid.rows)) {
+      this.selected = null;
+    }
+    this.render();
+    this.cb.onChange(this.chart);
+    return true;
+  }
+
+  /** True when there is at least one step to undo. */
+  canUndo(): boolean {
+    return this.undoStack.length > 0;
+  }
+
+  /**
+   * Drop the history. Used when a different file is loaded, where the old file's snapshots would
+   * restore its contents into the new one.
+   */
+  clearUndo(): void {
+    this.undoStack = [];
   }
 
   getChart(): Chart {
@@ -115,12 +195,26 @@ export class ChartCanvas {
   /** Select a cell and redraw the highlight. Passing null clears the selection. */
   setSelectedCell(col: number | null, row: number | null): void {
     this.selected = col === null || row === null ? null : { col, row };
+    // Selecting a cell means the click missed any label under it, so the label selection goes too.
+    if (this.selected) this.selectedItem = null;
     this.render();
   }
 
   /** The currently selected cell, or null. */
   getSelectedCell(): { col: number; row: number } | null {
     return this.selected;
+  }
+
+  /** The currently selected label's id, or null. */
+  getSelectedItem(): string | null {
+    return this.selectedItem;
+  }
+
+  /** Select a label by id, clearing the cell selection. Passing null clears the label selection. */
+  setSelectedItem(id: string | null): void {
+    this.selectedItem = id;
+    if (id) this.selected = null;
+    this.render();
   }
 
   /** The cell actions apply to: the one the user clicked, else the middle of the grid. */
@@ -277,11 +371,53 @@ export class ChartCanvas {
     const px = dataToScreenX(item.x, chart.x, rect);
     const py = dataToScreenY(item.y, chart.y, rect);
     const fontSize = clampNum(item.size ?? chart.baseFontSize ?? DEFAULTS.baseFontSize, LIMITS.minFontSize, LIMITS.maxFontSize, DEFAULTS.baseFontSize);
-    const g = svg(this.svg, 'g', { class: 'qc-item', transform: `translate(${px} ${py})` });
+    const selected = this.selectedItem === item.id;
+    const g = svg(this.svg, 'g', {
+      class: selected ? 'qc-item qc-selected' : 'qc-item',
+      transform: `translate(${px} ${py})`,
+    });
     g.dataset['itemId'] = item.id;
-    // A translucent plate behind the text keeps a label readable when it lands on a grid line or on
-    // another label; the text is what is editable, so it is drawn on top.
-    svg(g, 'rect', { x: -4, y: -fontSize, width: 8, height: fontSize + 8, class: 'qc-item-hit' });
+
+    // A hit plate as wide as the text, so a click anywhere on the label selects the label.
+    //
+    // This was an 8px-wide strip centred on the anchor point. The cell hit rects underneath cover
+    // the whole plot, so any click beside the glyphs — which is most of the label's own area —
+    // fell through to the cell and selected THAT instead. It looked like the cell was being
+    // selected when the user meant the label. Width is estimated rather than measured because
+    // getComputedTextLength needs layout this widget does not wait for; the estimate only has to be
+    // generous enough to cover the glyphs.
+    const width = estimateTextWidth(item.text, fontSize);
+
+    // The label's own background plate, when it has one. Drawn first so it sits behind the text,
+    // the hit plate and the selection box.
+    if (item.background) {
+      svg(g, 'rect', {
+        x: -width / 2 - 5, y: -fontSize - 3, width: width + 10, height: fontSize + 9,
+        class: 'qc-item-bg', rx: 3, fill: item.background,
+      });
+    }
+
+    svg(g, 'rect', {
+      x: -width / 2, y: -fontSize - 3, width, height: fontSize + 9, class: 'qc-item-hit',
+    });
+
+    // A box the author asked for, drawn under the selection box so the transient selection
+    // indicator always reads on top of the permanent one.
+    if (item.box) {
+      svg(g, 'rect', {
+        x: -width / 2 - 7, y: -fontSize - 6, width: width + 14, height: fontSize + 12,
+        class: 'qc-item-box', rx: 3,
+      });
+    }
+
+    // The selection box is drawn BEFORE the text so it frames it rather than covering it.
+    if (selected) {
+      svg(g, 'rect', {
+        x: -width / 2 - 5, y: -fontSize - 8, width: width + 10, height: fontSize + 14,
+        class: 'qc-item-selected', rx: 3,
+      });
+    }
+
     const text = svg(g, 'text', {
       x: 0, y: 0, class: 'qc-item-text', 'text-anchor': 'middle',
       'font-size': fontSize, fill: item.color ?? 'currentColor',
@@ -377,6 +513,7 @@ export class ChartCanvas {
       this.render();
       return;
     }
+    this.pushUndo();
     this.chart = dragged;
     this.render();
     this.cb.onChange(this.chart);
@@ -409,32 +546,41 @@ export class ChartCanvas {
   };
 
   /**
-   * Single click on an axis label (or the title) renames it in place.
+   * Single click selects; a click on an axis label or the title renames it in place.
    *
-   * A single click rather than a double click, unlike labels: the axis captions sit in empty gutter
-   * space where nothing else can be hit, so there is no gesture to disambiguate from and no reason
-   * to make the user wait. `stopPropagation` keeps the rename from also registering as a canvas
-   * gesture, and a click that lands on a label or a split line is ignored here — those keep their
-   * own drag semantics and must not be interrupted by a stray click.
+   * The axis captions sit in empty gutter space where nothing else can be hit, so a single click is
+   * unambiguous there and there is no reason to make the user wait for a double click.
+   *
+   * Order below is load-bearing, and the label branch MUST come first. The cell hit rects cover the
+   * whole plot, so with cells checked first a click on a label could only select the cell — which is
+   * exactly the reported bug: clicking text selected the cell underneath it. Labels are painted on
+   * top of cells, so a click that lands on one means the user aimed at the label.
    */
   private onClick = (evt: MouseEvent): void => {
     const target = evt.target as Element;
 
-    // A click on a cell selects it and does nothing else. Checked first because the cell hit rects
-    // cover the whole plot, so every other click on the plot would otherwise land on one.
+    const itemId = target.closest?.('.qc-item')?.getAttribute('data-item-id');
+    if (itemId) {
+      this.selectedItem = itemId;
+      this.selected = null;
+      this.render();
+      return;
+    }
+
+    // Split lines swallow the click rather than selecting the cell beneath them: dragging a split to
+    // resize the grid is a deliberate gesture and should not also change the selection.
+    if (target.closest?.('.qc-split-hit')) return;
+
     const cellCol = target.getAttribute?.('data-cell-col');
     const cellRow = target.getAttribute?.('data-cell-row');
     if (cellCol !== null && cellCol !== undefined && cellRow !== null && cellRow !== undefined) {
-      // A click that lands on a label or a split line keeps that element's own behaviour instead.
-      if (target.closest?.('.qc-item') || target.closest?.('.qc-split-hit')) return;
       this.selected = { col: Number(cellCol), row: Number(cellRow) };
-      void diag(this.app, `cell selected ${this.selected.col},${this.selected.row}`);
+      this.selectedItem = null;
       this.cb.onSelectCell?.(this.selected.col, this.selected.row);
       this.render();
       return;
     }
 
-    if (target.closest?.('.qc-item') || target.closest?.('.qc-split-hit')) return;
     const axis = target.getAttribute?.('data-axis');
     if (axis !== 'x' && axis !== 'y' && axis !== 'title') return;
     evt.stopPropagation();
@@ -447,7 +593,9 @@ export class ChartCanvas {
     const id = target.closest?.('.qc-item')?.getAttribute('data-item-id');
     if (!id) return;
     evt.preventDefault();
-    this.chart = { ...this.chart, items: this.chart.items.filter((i) => i.id !== id) };
+    this.removeItem(id);
+    // A selection box drawn around a label that no longer exists would frame empty space.
+    if (this.selectedItem === id) this.selectedItem = null;
     this.render();
     this.cb.onChange(this.chart);
   };
@@ -460,12 +608,21 @@ export class ChartCanvas {
     const label = text.trim();
     if (!label) return;
     const chart = this.getChart();
+    // With no coordinates the user has not pointed anywhere, so the cell they have selected is the
+    // only thing that says where the label belongs. Defaulting to the centre of the data range
+    // instead put every new label on the exact point where all the split lines meet, from which
+    // `cellAt` picked the top-right cell regardless of the selection — so clicking a cell and then
+    // pressing "Add label" appeared to do nothing.
+    const spot = x === undefined || y === undefined
+      ? cellCentre(chart, this.effectiveCell().col, this.effectiveCell().row)
+      : { x, y };
     const item: Item = {
       id: nextId(),
       text: label,
-      x: round2(x ?? (chart.x.min + chart.x.max) / 2),
-      y: round2(y ?? (chart.y.min + chart.y.max) / 2),
+      x: round2(spot.x),
+      y: round2(spot.y),
     };
+    this.pushUndo();
     this.chart = { ...chart, items: [...chart.items, item] };
     this.render();
     this.cb.onChange(this.chart);
@@ -478,6 +635,7 @@ export class ChartCanvas {
     if (text === null) return; // cancelled — leave everything as it was
     const t = text.trim();
     if (t === current) return; // unchanged — do not dirty the file for nothing
+    this.pushUndo();
     this.chart = { ...this.chart, [which]: { ...this.chart[which], label: t || `X axis` } };
     this.render();
     this.cb.onChange(this.chart);
@@ -489,7 +647,18 @@ export class ChartCanvas {
     if (text === null) return;
     const t = text.trim();
     if (t === (this.chart.title ?? '')) return;
+    this.pushUndo();
     this.chart = { ...this.chart, title: t || undefined };
+    this.render();
+    this.cb.onChange(this.chart);
+  }
+
+  /** Delete a label by id, clearing the selection if it was the one removed. */
+  removeItem(id: string): void {
+    if (!this.chart.items.some((i) => i.id === id)) return;
+    this.pushUndo();
+    this.chart = { ...this.chart, items: this.chart.items.filter((i) => i.id !== id) };
+    if (this.selectedItem === id) this.selectedItem = null;
     this.render();
     this.cb.onChange(this.chart);
   }
@@ -501,8 +670,10 @@ export class ChartCanvas {
     const chart = this.chart;
     // An emptied label is a delete: leaving a blank node on the canvas would be a trap, since the
     // only way to remove it is the context menu.
+    this.pushUndo();
     if (!label) {
       this.chart = { ...chart, items: chart.items.filter((i) => i.id !== item.id) };
+      if (this.selectedItem === item.id) this.selectedItem = null;
     } else {
       this.chart = { ...chart, items: chart.items.map((i) => (i.id === item.id ? { ...i, text: label } : i)) };
     }
@@ -511,16 +682,15 @@ export class ChartCanvas {
   }
 
   async editCell(col: number, row: number): Promise<void> {
-    await diag(this.app, `editCell NAME ${col},${row}`);
     const existing = findCell(this.chart, col, row);
     const text = await this.cb.promptText(existing?.label ?? '', `Name cell (${col + 1}, ${row + 1})`);
-    await diag(this.app, `editCell prompt returned ${text === null ? 'CANCEL' : JSON.stringify(text)}`);
     if (text === null) return;
     const label = text.trim();
     const others = this.chart.cells.filter((c) => !(c.col === col && c.row === row));
     const cells = label
       ? [...others, { col, row, label, color: existing?.color, note: existing?.note }]
       : others;
+    this.pushUndo();
     this.chart = { ...this.chart, cells };
     this.render();
     this.cb.onChange(this.chart);
@@ -530,6 +700,12 @@ export class ChartCanvas {
     const chart = this.chart;
     // Cells outside the new grid would render nowhere; drop them rather than silently misplacing.
     const cells = chart.cells.filter((c) => c.col < columns && c.row < rows);
+    // Setting the grid to the size it already has is not a change, so it must not push a snapshot —
+    // otherwise undo appears to work while stepping through states that never occurred.
+    if (columns === chart.grid.columns && rows === chart.grid.rows && cells.length === chart.cells.length) {
+      return;
+    }
+    this.pushUndo();
     this.chart = { ...chart, grid: { columns, rows }, cells };
     // A selection that no longer exists would leave the toolbar acting on a cell that is not drawn.
     if (this.selected && (this.selected.col >= columns || this.selected.row >= rows)) this.selected = null;
@@ -539,7 +715,10 @@ export class ChartCanvas {
 
   setAxis(which: 'x' | 'y', patch: Partial<Chart['x']>): void {
     const chart = this.chart;
-    this.chart = { ...chart, [which]: { ...chart[which], ...patch } };
+    const next: Axis = { ...chart[which], ...patch };
+    if (JSON.stringify(next) === JSON.stringify(chart[which])) return;
+    this.pushUndo();
+    this.chart = { ...chart, [which]: next };
     this.render();
     this.cb.onChange(this.chart);
   }
@@ -560,6 +739,39 @@ function svg<K extends keyof SVGElementTagNameMap>(
 
 function inRect(p: { x: number; y: number }, r: PlotRect): boolean {
   return p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height;
+}
+
+/**
+ * Roughly how wide a label will render, in px.
+ *
+ * Used only to size the click target, so it is deliberately generous — over-estimating costs a few
+ * px of tolerance around the text, while under-estimating puts the edge of a long label outside its
+ * own hit area, which is the bug this replaced.
+ *
+ * CJK and other full-width characters count as one em, Latin as about half, which is close enough
+ * for a sans-serif UI face and needs no layout, which is the point: `getComputedTextLength` requires
+ * the element to have been laid out, and this widget redraws synchronously before that happens.
+ */
+function estimateTextWidth(text: string, fontSize: number): number {
+  let em = 0;
+  for (const ch of text) {
+    const c = ch.codePointAt(0) ?? 0;
+    // CJK, Hangul, Kana, fullwidth forms and CJK punctuation are all roughly one em wide.
+    const wide =
+      (c >= 0x1100 && c <= 0x115f) ||   // Hangul Jamo
+      (c >= 0x2e80 && c <= 0x303e) ||   // CJK radicals, Kangxi, punctuation
+      (c >= 0x3041 && c <= 0x33ff) ||   // Kana, Hangul compat, CJK compat
+      (c >= 0x3400 && c <= 0x4dbf) ||   // CJK ext A
+      (c >= 0x4e00 && c <= 0x9fff) ||   // CJK unified
+      (c >= 0xa000 && c <= 0xa4cf) ||   // Yi
+      (c >= 0xac00 && c <= 0xd7a3) ||   // Hangul syllables
+      (c >= 0xf900 && c <= 0xfaff) ||   // CJK compat ideographs
+      (c >= 0xff00 && c <= 0xff60) ||   // fullwidth forms
+      (c >= 0xffe0 && c <= 0xffe6);
+    em += wide ? 1 : 0.55;
+  }
+  // A minimum, so a single-character label is still comfortably clickable.
+  return Math.max(14, em * fontSize);
 }
 
 function round2(n: number): number {

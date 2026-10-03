@@ -6,45 +6,63 @@ diff-friendly.
 
 ## What it does
 
-- **Any N × M grid**, not just four quadrants. Set columns and rows independently.
+- **Any N × M grid**, not just four quadrants. Set columns and rows independently, from 1×1 to 8×8.
 - **Labelled axes** — name the X and Y axes, set their ranges, and the tick values are derived.
   Explicit ticks are supported when you want them.
 - **Free text anywhere** — labels are not tied to quadrants. Drop one at any coordinate, drag it to
   reposition, double-click to edit, right-click to delete.
-- **Cell labels and notes** — name each cell and give it a background tint, with optional longer
-  text underneath.
+- **Cell labels, notes and colours** — name each cell, add longer text underneath, and tint it.
+- **Styled labels** — give a label its own background plate or an outline, so it stays readable
+  wherever it lands.
+- **Undo** — <kbd>Ctrl</kbd>+<kbd>Z</kbd> steps back any change, including an accidental drag.
+- **Export** — save the chart as a JPG or PNG next to the `.mdx` file.
+- **Built-in examples** — a SWOT and a talent nine-box, creatable from the command palette.
 - **Your notes stay yours** — the chart is the YAML frontmatter; everything below it is free text the
   plugin never touches.
+- **Scriptable** — a chart is plain YAML, so anything that can write YAML can create one.
 
 ## Using it
 
 **Create a chart** — command palette → *Create quadrant chart*. Pick a name and it opens straight
 into the editor.
 
-**Add text** — double-click anywhere on the plot, or use the *Add label* button.
+**Start from an example** — command palette → *Create quadrant chart from example* → SWOT or talent
+nine-box. You get the cells, colours, labels and an explanatory body to edit.
+
+**Add text** — double-click anywhere on the plot, or use the *Add label* button. With nothing
+pointed at, a new label lands in the middle of the cell you last clicked.
 
 **Move text** — drag it.
 
-**Edit text** — double-click it. Clearing the text deletes the label.
+**Edit text** — double-click it, or select it and use the *Label* button → *Edit text…*. Clearing
+the text deletes the label.
 
-**Delete text** — right-click it.
+**Delete text** — right-click it, or select it and use the *Label* button → *Delete label*.
 
-**Change the grid** — the **Grid N×M** button in the toolbar. It opens a menu with three sections:
+**Select a label or a cell** — click it. A click on a label selects the label, never the cell
+underneath; a click on empty space selects the cell. Both draw a dashed box.
 
-- **Columns (split the horizontal axis)** — 1 to 8
-- **Rows (split the vertical axis)** — 1 to 8
-- **Presets** — 2 × 2, 3 × 3, 4 × 4
+**Style a label** — select it, then *Label* → background colour and/or *Draw a box around it*.
 
-Columns and rows are set independently, so any N × M from 1×1 to 8×8 is reachable; the button always
-shows the current size. You can also drag a dashed split line on the canvas to resize.
+**Name a cell** — click the cell, then the **Cell** button.
 
-**Name a cell** — the **Cell** button names the cell in the middle of the plot. To name a different
-one, resize the grid so that cell is the middle one, or edit the `cells:` list in the frontmatter
-directly, where each entry is `{col, row}` counted from the low end of each axis.
+**Change the grid** — the **Grid N×M** button. Columns and rows are independent, and the button
+always shows the current size. You can also drag a dashed split line on the canvas.
 
-**Name the axes / set the range** — **Axes** button, or just click the X or Y caption on the canvas.
+**Name the axes / set the range** — **Axes** button, or click the X or Y caption on the canvas.
+
+**Export an image** — the **Export** button, or the command palette → *Export chart as image*. Choose
+JPG or PNG; the file is written beside the `.mdx` and never overwrites an existing one.
 
 Everything you do is written straight to the file, so you can also just edit the YAML.
+
+## Keyboard
+
+| Shortcut | Action |
+|---|---|
+| <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Z</kbd> | Undo the last change to this chart |
+
+Redo is not offered — undo steps back one change at a time.
 
 ## The `.mdx` format
 
@@ -76,6 +94,8 @@ items:
     text: Rework the sync engine
     x: 8.2
     y: 9
+    background: "#fdd663"   # optional plate behind the text
+    box: true                # optional outline around it
 ---
 
 Notes go here. The plugin never rewrites anything below the frontmatter.
@@ -168,8 +188,8 @@ pipeline of its own, but be aware of it if a vault ever gains a real MDX toolcha
 ```bash
 npm install
 npm run build     # typecheck + production bundle -> main.js
-npm test          # 155 tests: format, geometry, canvas hit-testing, save paths, and
-                  # interoperability with Script/mdx_chart.py
+npm test          # 274 tests: format, geometry, hit-testing, undo, image export, the
+                  # save path, and interoperability with Script/mdx_chart.py
 ```
 
 To build straight into a vault's plugin folder:

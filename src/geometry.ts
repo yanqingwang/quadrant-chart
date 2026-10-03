@@ -116,6 +116,23 @@ export function cellRect(chart: Chart, col: number, row: number, rect: PlotRect)
   };
 }
 
+/**
+ * The centre of a grid cell, in DATA space.
+ *
+ * This is where a new label belongs. The previous behaviour used the centre of the whole data range,
+ * which on an even grid is the point where every split line meets — a label there is on the boundary
+ * of two or four cells, so which cell it "is" becomes an artefact of the rounding in `cellAt`. Here
+ * the result is strictly interior, which is what makes a label's cell unambiguous afterwards.
+ */
+export function cellCentre(chart: Chart, col: number, row: number): { x: number; y: number } {
+  const w = (chart.x.max - chart.x.min) / chart.grid.columns;
+  const h = (chart.y.max - chart.y.min) / chart.grid.rows;
+  return {
+    x: chart.x.min + (col + 0.5) * w,
+    y: chart.y.min + (row + 0.5) * h,
+  };
+}
+
 /** The grid cell containing a data point, or null when the point is outside the plot. */
 export function cellAt(chart: Chart, x: number, y: number): { col: number; row: number } | null {
   if (x < chart.x.min || x > chart.x.max || y < chart.y.min || y > chart.y.max) return null;

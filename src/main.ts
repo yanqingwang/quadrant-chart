@@ -7,7 +7,7 @@
  * ever gains a real MDX toolchain, the two would compete for the same suffix.
  */
 
-import { App, DataAdapter, Menu, MenuItem, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
+import { App, Menu, MenuItem, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
 import { Chart, DEFAULTS, LIMITS, createChart, clampInt } from './model';
 import { chartToFileText, defaultBody } from './mdx';
 import { ChartTemplate, TEMPLATES } from './templates';
@@ -32,11 +32,6 @@ export default class QuadrantChartPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
-
-    // Expose the adapter and plugin dir for the save-path diagnostics in mdx.ts, set before anything
-    // else so even a startup failure is recorded.
-    (globalThis as Record<string, unknown>)['__qcAdapter'] = (this.app.vault as unknown as { adapter?: DataAdapter }).adapter;
-    (globalThis as Record<string, unknown>)['__qcPluginDir'] = `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
 
     // `.mdx` is not a format Obsidian knows, so it must be claimed or the vault will treat these
     // files as opaque binaries and never offer them for opening.
@@ -77,6 +72,12 @@ export default class QuadrantChartPlugin extends Plugin {
       // the window's last event rather than taken as a parameter. The menu is anchored there, so
       // it appears under the cursor when invoked by mouse and near the centre when by keyboard.
       callback: () => void this.pickTemplate(lastPointerEvent()),
+    });
+
+    this.addCommand({
+      id: 'export-chart-image',
+      name: 'Export chart as image',
+      callback: () => void this.pickExport(lastPointerEvent()),
     });
 
     this.addCommand({
@@ -204,6 +205,46 @@ export default class QuadrantChartPlugin extends Plugin {
     }
     await this.openChart(file);
     new Notice(`Created ${file.path} from the ${tpl.name} example`);
+  }
+
+  /**
+   * Pick an image format and export.
+   *
+   * The toolbar passes the button's own event so the menu opens under the cursor; the command palette
+   * passes a synthetic one, because Obsidian types a command's callback as taking no arguments.
+   */
+  pickExport(at: MouseEvent): void {
+    const menu = new Menu();
+    menu.addItem((it: MenuItem) => it
+      .setSection('Export as')
+      .setTitle('JPG — smaller file')
+      .onClick(() => void this.runExport('jpeg')));
+    menu.addItem((it: MenuItem) => it
+      .setSection('Export as')
+      .setTitle('PNG — lossless, sharper text')
+      .onClick(() => void this.runExport('png')));
+    menu.showAtMouseEvent(at);
+  }
+
+  private async runExport(kind: 'jpeg' | 'png'): Promise<void> {
+    const view = this.chartView();
+    if (!view) {
+      new Notice('Open a chart first.');
+      return;
+    }
+    try {
+      const written = await view.exportImage(kind);
+      new Notice(`Saved ${written.path}`);
+    } catch (err) {
+      new Notice(`Could not export the chart: ${(err as Error).message}`);
+    }
+  }
+
+  /** The active chart view, if one is focused. */
+  private chartView(): QuadrantChartView | null {
+    // getActiveViewOfType wants the constructor, not the view-type string.
+    const leaf = this.app.workspace.getActiveViewOfType(QuadrantChartView);
+    return leaf instanceof QuadrantChartView ? leaf : null;
   }
 
   /**

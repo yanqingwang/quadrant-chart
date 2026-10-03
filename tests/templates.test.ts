@@ -14,8 +14,17 @@ import { parseChartFromText } from '../src/mdx';
 import { findCell } from '../src/geometry';
 import { Chart } from '../src/model';
 import { TEMPLATES, findTemplate } from '../src/templates';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
+const SELF = '/home/wang/wk/code/obsidian-quadrant-chart/src/templates.ts';
+
+/**
+ * The user's scratch copies in the workspace. Read-only, and deliberately NOT the template source —
+ * see the drift block below for why.
+ */
 const SOURCE: Record<string, string> = {
   swot: '/home/wang/wk/wk/SWOT-插件价值.mdx',
   'nine-box': '/home/wang/wk/wk/人才九宫格-示例.mdx',
@@ -159,19 +168,55 @@ describe('talent nine-box example template', () => {
   });
 });
 
-describe('templates.ts is in sync with the workspace examples', () => {
-  // A generated file that drifts from its source is invisible until someone notices the plugin
-  // serving a stale example. This fails with the exact command needed to re-sync.
-  it('matches the .mdx files byte for byte', () => {
-    for (const t of TEMPLATES) {
-      const src = SOURCE[t.id];
-      if (!src) throw new Error(`no source path recorded for template ${t.id}`);
-      const onDisk = fs.readFileSync(src, 'utf8');
-      expect({ id: t.id, same: t.text === onDisk }).toEqual({
-        id: t.id,
-        same: true,
+describe('templates.ts is the pristine generated example', () => {
+  // It is deliberately NOT compared against the workspace .mdx files. Those are the user's scratch
+  // copies — they get opened in Obsidian and edited while trying the plugin out, and a label added
+  // to the talent grid while testing is exactly what happened. Byte-comparing against them made the
+  // suite fail for something that is the file working as intended.
+  //
+  // The invariant that does matter: the shipped template must be what the generator produces, not a
+  // snapshot of whatever the user last did. So it is rebuilt into a temporary directory by the same
+  // script and compared with that. That keeps the guarantee while staying independent of the
+  // workspace entirely.
+  it('matches a fresh run of the generator, byte for byte', () => {
+    // Regenerate to a temporary path so this test cannot mutate the working tree, then compare.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-tpl-'));
+    const out = path.join(tmp, 'templates.ts');
+    try {
+      execFileSync('python3', ['/home/wang/wk/Script/build_templates.py'], {
+        encoding: 'utf8',
+        env: { ...process.env, QC_TEMPLATE_OUT: out },
       });
+      expect(fs.existsSync(out)).toBe(true);
+      expect(fs.readFileSync(out, 'utf8')).toBe(fs.readFileSync(SELF, 'utf8'));
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
     }
+  });
+
+  it('is a pristine example, carrying no edit made in the workspace copy', () => {
+    // The workspace nine-box gained a tenth label while the plugin was being tried out. The shipped
+    // template must not have absorbed it: it is a teaching example, so every box holds exactly one
+    // occupant and nothing the user typed leaks into a release.
+    const nineBox = parse(findTemplate('nine-box')!);
+    expect(nineBox.items).toHaveLength(9);
+    for (const cell of nineBox.cells) {
+      const n = nineBox.items.filter((i) => {
+        const p = cellOf(nineBox, i.x, i.y);
+        return p.col === cell.col && p.row === cell.row;
+      }).length;
+      expect({ box: cell.label, n }).toEqual({ box: cell.label, n: 1 });
+    }
+    expect(findTemplate('nine-box')!.text).not.toContain('FDE');
+  });
+
+  it('the workspace copies are the user scratch area and are NOT the source of truth', () => {
+    // Guard against the test suite reaching into the workspace again: if someone reintroduces a
+    // comparison against these files, the plugin would start failing whenever the user edits an
+    // example to try something out.
+    const nineBox = fs.readFileSync(SOURCE['nine-box'], 'utf8');
+    expect(nineBox).not.toBe(findTemplate('nine-box')!.text);   // they genuinely differ now
+    expect(parseChartFromText(nineBox)).not.toBeNull();          // and the copy is still valid
   });
 
   it('names the generator in its header, so the drift has a documented fix', () => {

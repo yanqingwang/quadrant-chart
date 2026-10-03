@@ -1,9 +1,11 @@
 {
   "id": "quadrant-chart",
   "name": "Quadrant Chart",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "minAppVersion": "1.5.0",
-  "description": "Draw labelled quadrant charts (N x M grid) with free-floating text, stored in .mdx files.",
+  "description": "Draw labelled N x M quadrant charts with free-floating text, stored as plain-YAML .mdx files you can also edit by hand or with a script.",
   "author": "rosswang",
+  "authorUrl": "https://github.com/yanqingwang",
+  "fundingUrl": "https://github.com/yanqingwang/quadrant-chart",
   "isDesktopOnly": false
 }

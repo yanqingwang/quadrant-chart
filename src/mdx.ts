@@ -12,7 +12,6 @@
  */
 
 import { App, TFile, parseYaml, stringifyYaml } from 'obsidian';
-import { diag } from './diag';
 import { Chart, normalizeChart, createChart, DEFAULTS } from './model';
 
 /**
@@ -40,6 +39,10 @@ export function chartToFrontmatter(chart: Chart): Record<string, unknown> {
     out['items'] = chart.items.map((i) => {
       const o: Record<string, unknown> = { id: i.id, text: i.text, x: round(i.x), y: round(i.y) };
       if (i.color) o['color'] = i.color;
+      if (i.background) o['background'] = i.background;
+      // Only written when true. `box: false` in a file would be noise in every diff of a chart
+      // where most labels have no box.
+      if (i.box) o['box'] = true;
       if (i.size) o['size'] = i.size;
       return o;
     });
@@ -165,7 +168,6 @@ export function extractBody(text: string): string {
  * after it — the user's prose — is carried across untouched.
  */
 export async function writeChart(app: App, file: TFile, chart: Chart): Promise<void> {
-  await diag(app, `writeChart: ${file.path} items=${chart.items.length}`);
   try {
     await app.vault.process(file, (text) => spliceFrontmatter(text, chart));
     // Confirm the write landed rather than trusting the call. Isolated in its own try/catch: a
@@ -173,16 +175,13 @@ export async function writeChart(app: App, file: TFile, chart: Chart): Promise<v
     try {
       const after = await app.vault.read(file);
       const reparsed = parseChartFromText(after);
-      await diag(app, `writeChart: VERIFY onDisk items=${reparsed?.items.length ?? 'PARSE_FAIL'}`);
       if (reparsed && reparsed.items.length !== chart.items.length) {
         throw new Error(`save verification failed: wrote ${chart.items.length} labels but the file has ${reparsed.items.length}`);
       }
     } catch (e) {
       if ((e as Error).message.startsWith('save verification failed')) throw e;
-      await diag(app, `writeChart: verify read skipped (${(e as Error).message})`);
     }
   } catch (err) {
-    await diag(app, `writeChart: THREW ${(err as Error).message}`);
     throw err;
   }
 }

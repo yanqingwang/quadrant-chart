@@ -60,6 +60,16 @@ export interface Item {
   color?: string;
   /** Font size in px, relative to the view's base size. */
   size?: number;
+  /**
+   * Optional plate drawn behind the text.
+   *
+   * The default is a stroked outline only (see `box`). A filled plate exists because a label is
+   * otherwise readable only where it happens to land: on a coloured cell, on a grid line, or on top
+   * of another label, all three of which are common and all of which make the text hard to read.
+   */
+  background?: string;
+  /** Draw a border around the label. Cheap emphasis that does not hide the chart behind it. */
+  box?: boolean;
 }
 
 /** The complete chart. Every field has a default, so a minimal .mdx stays valid. */
@@ -236,6 +246,10 @@ function normalizeItems(raw: unknown[], x: Axis, y: Axis): Item[] {
       y: clampNum(e['y'], y.min, y.max, y.min),
     };
     if (typeof e['color'] === 'string' && e['color'].trim()) item.color = e['color'].trim();
+    if (typeof e['background'] === 'string' && e['background'].trim()) item.background = e['background'].trim();
+    // Only a real boolean counts. A hand-edited `"false"` string is truthy in JavaScript, so
+    // accepting it would silently show a box the author explicitly turned off.
+    if (typeof e['box'] === 'boolean') item.box = e['box'];
     const size = Number(e['size']);
     if (Number.isFinite(size) && size > 0) item.size = clampNum(size, LIMITS.minFontSize, LIMITS.maxFontSize, 0);
     out.push(item);
