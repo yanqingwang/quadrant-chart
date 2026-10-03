@@ -27,7 +27,8 @@ import { App, TFile } from 'obsidian';
 import { Chart, DEFAULTS, LIMITS, clampNum } from './model';
 import {
   Margins, DEFAULT_MARGINS,
-  axisTicks, cellRect, dataToScreenX, dataToScreenY, findCell, formatTick, splitPositions,
+  axisTicks, cellRect, dataToScreenX, dataToScreenY, estimateTextWidth, findCell, formatTick,
+  splitPositions,
 } from './geometry';
 
 /** Colours and fonts resolved from the current theme, so an export follows light/dark mode. */
@@ -45,13 +46,23 @@ export interface ExportOptions {
   /** Logical size in CSS px, before `scale`. Independent of the pane size, so exports are stable. */
   width: number;
   height: number;
-  /** Device-pixel multiplier. 2 keeps text crisp without an unreasonable file size. */
+  /** Device-pixel multiplier. 2 keeps text crisp without an unreasonable file size. SVG ignores it. */
   scale: number;
-  /** JPEG quality 0..1. Ignored for PNG. */
+  /** JPEG quality 0..1. Ignored for PNG and SVG. */
   quality: number;
+  /**
+   * Background to paint, or `null` for none.
+   *
+   * `null` is what the transparent option means: PNG and SVG carry alpha, JPEG cannot, so this is
+   * only ever null for a format that supports it. Kept required rather than defaulted on purpose —
+   * a caller who forgets is a caller whose JPEG comes out with whatever the canvas held.
+   */
+  background: string | null;
 }
 
-export const DEFAULT_EXPORT: ExportOptions = { width: 1400, height: 900, scale: 2, quality: 0.92 };
+export const DEFAULT_EXPORT: ExportOptions = {
+  width: 1400, height: 900, scale: 2, quality: 0.92, background: '#ffffff',
+};
 
 /** Read the theme from a live element, so the export matches what the user is looking at. */
 export function resolveExportTheme(el: Element | null): ExportTheme {
@@ -82,6 +93,9 @@ const CELL_LABEL_WEIGHT = '600';
 const NOTE_LINE_HEIGHT = 1.35;
 const TICK_SIZE = 11;
 
+/** How wide a piece of text is, in px. All wrapping is expressed through this one function. */
+export type TextMeasurer = (text: string) => number;
+
 /**
  * Draw the whole chart.
  *
@@ -107,16 +121,23 @@ export function renderChartToCanvas(
   ctx.save();
   ctx.scale(scale, scale);
 
-  // Opaque background first: JPEG cannot represent transparency, and without this the chart would
-  // be composited onto whatever the canvas happened to contain.
-  ctx.fillStyle = theme.background;
-  ctx.fillRect(0, 0, width, height);
+  // Opaque background first: JPEG cannot represent transparency, and without this fill the chart
+  // would be composited onto whatever the canvas happened to contain.
+  //
+  // Tested for truthiness rather than `!== null`. TypeScript forces the field to be stated, but a
+  // caller reaching this from plain JavaScript can still omit it, and `undefined !== null` is true —
+  // which would set `fillStyle` to undefined and paint the canvas its default black. Skipping the
+  // fill instead yields a transparent image, which is the recoverable mistake.
+  if (opts.background) {
+    ctx.fillStyle = opts.background;
+    ctx.fillRect(0, 0, width, height);
+  }
 
   drawCells(ctx, chart, plot, theme);
   drawGrid(ctx, chart, plot, theme);
   drawFrame(ctx, plot, theme);
   drawAxes(ctx, chart, plot, theme);
-  drawItems(ctx, chart, plot, theme);
+  drawItems(ctx, chart, plot, theme, opts.background);
   ctx.restore();
 }
 
@@ -151,7 +172,7 @@ function drawCells(ctx: CanvasRenderingContext2D, chart: Chart, plot: ReturnType
         ctx.font = `${CELL_LABEL_WEIGHT} ${CELL_LABEL_SIZE}px ${theme.fontUi}`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
-        const lines = wrapText(ctx, cell.label, Math.max(10, r.width - 12));
+        const lines = wrapText((t) => ctx.measureText(t).width, cell.label, Math.max(10, r.width - 12));
         // One line only for the caption: a wrapped cell title stops reading as a title.
         ctx.fillText(lines[0], r.x + 6, cursorY);
         cursorY += CELL_LABEL_SIZE + 2;
@@ -159,7 +180,7 @@ function drawCells(ctx: CanvasRenderingContext2D, chart: Chart, plot: ReturnType
       if (cell.note) {
         ctx.fillStyle = theme.muted;
         ctx.font = `${CELL_NOTE_SIZE}px ${theme.fontUi}`;
-        const lines = wrapText(ctx, cell.note, Math.max(10, r.width - 12));
+        const lines = wrapText((t) => ctx.measureText(t).width, cell.note, Math.max(10, r.width - 12));
         const lineH = CELL_NOTE_SIZE * NOTE_LINE_HEIGHT;
         for (const line of lines) {
           if (cursorY + lineH > r.y + r.height - 6) break;  // clip rather than overflow
@@ -250,7 +271,10 @@ function drawAxes(ctx: CanvasRenderingContext2D, chart: Chart, plot: ReturnType<
   ctx.restore();
 }
 
-function drawItems(ctx: CanvasRenderingContext2D, chart: Chart, plot: ReturnType<typeof cellRect>, theme: ExportTheme): void {
+function drawItems(
+  ctx: CanvasRenderingContext2D, chart: Chart, plot: ReturnType<typeof cellRect>,
+  theme: ExportTheme, background: string | null,
+): void {
   for (const item of chart.items) {
     const px = dataToScreenX(item.x, chart.x, plot);
     const py = dataToScreenY(item.y, chart.y, plot);
@@ -274,9 +298,12 @@ function drawItems(ctx: CanvasRenderingContext2D, chart: Chart, plot: ReturnType
 
     // The halo, matching the on-screen `paint-order: stroke`. Canvas has no paint-order, so this is
     // the outline drawn first and the glyphs on top — the same visual result.
+    //
+    // On a transparent export the halo has to fall back to the theme background, because a light halo
+    // over a transparent plate would leave a white smear where the transparency is supposed to be.
     ctx.lineJoin = 'round';
     ctx.lineWidth = 3;
-    ctx.strokeStyle = item.background || theme.background;
+    ctx.strokeStyle = item.background || background || theme.background;
     ctx.strokeText(item.text, 0, 0);
     ctx.fillStyle = item.color ?? theme.text;
     ctx.fillText(item.text, 0, 0);
@@ -298,14 +325,18 @@ function drawItems(ctx: CanvasRenderingContext2D, chart: Chart, plot: ReturnType
  * by the same loop: a break is taken at the last space if there was one, otherwise wherever the width
  * runs out. Splitting on words alone would put an entire Chinese sentence on one line, and splitting
  * on characters alone would break English mid-word.
+ *
+ * Typed to the one method it uses rather than to `CanvasRenderingContext2D`, so the SVG exporter can
+ * pass a measurement stub instead of a real canvas. `wrapText` is the single wrapping rule for both
+ * outputs, which is what keeps them from disagreeing about where a line ends.
  */
-export function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+export function wrapText(measure: TextMeasurer, text: string, maxWidth: number): string[] {
   const out: string[] = [];
   for (const paragraph of text.split('\n')) {
     let line = '';
     for (const ch of paragraph) {
       const candidate = line + ch;
-      if (line && ctx.measureText(candidate).width > maxWidth) {
+      if (line && measure(candidate) > maxWidth) {
         // Prefer a word boundary if one is available in the text already committed.
         const space = line.lastIndexOf(' ');
         if (space > 0) {
@@ -343,9 +374,158 @@ function roundRect(
   ctx.closePath();
 }
 
+// ── SVG ───────────────────────────────────────────────────────────────────────
+
+/**
+ * Build a standalone SVG of the chart.
+ *
+ * Like the canvas exporter, this emits only native SVG primitives — no `foreignObject`, no CSS, no
+ * external references. Both constraints are load-bearing rather than stylistic:
+ *
+ *  - `foreignObject` is dropped by Chromium when an SVG is loaded as an image, and by most SVG
+ *    consumers besides. Cell text drawn that way disappears.
+ *  - Styles must be inline because an SVG opened on its own, or embedded in a document, has no
+ *    stylesheet. An SVG that inherits the view's CSS renders unstyled everywhere else.
+ *
+ * The trade-off against the canvas exporter is exactness of text measurement: there is no laid-out
+ * element to measure, so wrapping uses the same estimate the canvas uses for hit targets. Both agree,
+ * which matters more than either being precisely right.
+ */
+export function buildChartSvg(
+  chart: Chart,
+  theme: ExportTheme,
+  opts: ExportOptions = DEFAULT_EXPORT,
+): string {
+  const { width, height } = opts;
+  const margins: Margins = { ...DEFAULT_MARGINS, top: 48 };
+  const plot = {
+    x: margins.left,
+    y: margins.top,
+    width: Math.max(1, width - margins.left - margins.right),
+    height: Math.max(1, height - margins.top - margins.bottom),
+  };
+  const out: string[] = [];
+  const put = (s: string) => { out.push(s); };
+
+  // Explicit width/height as well as a viewBox: an SVG loaded as an image has no intrinsic size
+  // without them, and renders at the default 300x150 instead of the size asked for.
+  put(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`);
+  put(`<title>${esc(chart.title ?? 'Quadrant chart')}</title>`);
+
+  if (opts.background) {
+    put(`<rect x="0" y="0" width="${width}" height="${height}" fill="${esc(opts.background)}"/>`);
+  }
+
+  // Cells.
+  for (let row = 0; row < chart.grid.rows; row += 1) {
+    for (let col = 0; col < chart.grid.columns; col += 1) {
+      const cell = findCell(chart, col, row);
+      if (!cell) continue;
+      const r = cellRect(chart, col, row, plot);
+      if (cell.color) {
+        put(`<rect x="${n(r.x)}" y="${n(r.y)}" width="${n(r.width)}" height="${n(r.height)}" fill="${esc(cell.color)}" fill-opacity="0.18"/>`);
+      }
+      if (!cell.label && !cell.note) continue;
+
+      let cursorY = r.y + 6;
+      if (cell.label) {
+        // One line for the caption: a wrapped cell title stops reading as a title.
+        const line = wrapText((t) => estimateTextWidth(t, CELL_LABEL_SIZE), cell.label, Math.max(10, r.width - 12))[0];
+        put(`<text x="${n(r.x + 6)}" y="${n(cursorY + CELL_LABEL_SIZE)}" fill="${esc(theme.text)}" font-family="${esc(theme.fontUi)}" font-size="${CELL_LABEL_SIZE}" font-weight="${CELL_LABEL_WEIGHT}">${esc(line)}</text>`);
+        cursorY += CELL_LABEL_SIZE + 2;
+      }
+      if (cell.note) {
+        const lineH = CELL_NOTE_SIZE * NOTE_LINE_HEIGHT;
+        for (const line of wrapText((t) => estimateTextWidth(t, CELL_NOTE_SIZE), cell.note, Math.max(10, r.width - 12))) {
+          if (cursorY + lineH > r.y + r.height - 6) break;   // clip rather than overflow
+          put(`<text x="${n(r.x + 6)}" y="${n(cursorY + CELL_NOTE_SIZE)}" fill="${esc(theme.muted)}" font-family="${esc(theme.fontUi)}" font-size="${CELL_NOTE_SIZE}">${esc(line)}</text>`);
+          cursorY += lineH;
+        }
+      }
+    }
+  }
+
+  // Split lines and frame.
+  const { xs, ys } = splitPositions(chart, plot);
+  put(`<g stroke="${esc(theme.faint)}" stroke-width="1">`);
+  for (const x of xs) put(`<line x1="${n(x)}" y1="${n(plot.y)}" x2="${n(x)}" y2="${n(plot.y + plot.height)}" stroke-opacity="0.5"/>`);
+  for (const y of ys) put(`<line x1="${n(plot.x)}" y1="${n(y)}" x2="${n(plot.x + plot.width)}" y2="${n(y)}" stroke-opacity="0.5"/>`);
+  put('</g>');
+  put(`<rect x="${n(plot.x)}" y="${n(plot.y)}" width="${n(plot.width)}" height="${n(plot.height)}" fill="none" stroke="${esc(theme.faint)}" stroke-width="1"/>`);
+
+  // Ticks.
+  for (const t of axisTicks(chart.x)) {
+    const px = dataToScreenX(t, chart.x, plot);
+    if (px < plot.x - 0.5 || px > plot.x + plot.width + 0.5) continue;
+    put(`<text x="${n(px)}" y="${n(plot.y + plot.height + 20)}" fill="${esc(theme.muted)}" font-family="${esc(theme.fontUi)}" font-size="${TICK_SIZE}" text-anchor="middle">${esc(formatTick(t))}</text>`);
+  }
+  for (const t of axisTicks(chart.y)) {
+    const py = dataToScreenY(t, chart.y, plot);
+    if (py < plot.y - 0.5 || py > plot.y + plot.height + 0.5) continue;
+    put(`<text x="${n(plot.x - 9)}" y="${n(py + 4)}" fill="${esc(theme.muted)}" font-family="${esc(theme.fontUi)}" font-size="${TICK_SIZE}" text-anchor="end">${esc(formatTick(t))}</text>`);
+  }
+
+  if (chart.x.label) {
+    put(`<text x="${n(plot.x + plot.width / 2)}" y="${n(plot.y + plot.height + 42)}" fill="${esc(theme.text)}" font-family="${esc(theme.fontUi)}" font-size="13" text-anchor="middle">${esc(chart.x.label)}</text>`);
+  }
+  if (chart.y.label) {
+    // Rotated about its own centre, matching the on-screen axis. The translate places the anchor and
+    // the rotate turns the text up the left gutter from there.
+    const cy = plot.y + plot.height / 2;
+    put(`<text x="0" y="0" transform="translate(20 ${n(cy)}) rotate(-90)" fill="${esc(theme.text)}" font-family="${esc(theme.fontUi)}" font-size="13" text-anchor="middle">${esc(chart.y.label)}</text>`);
+  }
+  if (chart.title) {
+    put(`<text x="${n(plot.x)}" y="24" fill="${esc(theme.text)}" font-family="${esc(theme.fontUi)}" font-size="16" font-weight="600">${esc(chart.title)}</text>`);
+  }
+
+  // Free labels.
+  const haloBase = opts.background ?? theme.background;
+  for (const item of chart.items) {
+    const px = dataToScreenX(item.x, chart.x, plot);
+    const py = dataToScreenY(item.y, chart.y, plot);
+    const fontSize = clampNum(
+      item.size ?? chart.baseFontSize ?? DEFAULTS.baseFontSize,
+      LIMITS.minFontSize, LIMITS.maxFontSize, DEFAULTS.baseFontSize,
+    );
+    const w = estimateTextWidth(item.text, fontSize);
+    if (item.background) {
+      put(`<rect x="${n(px - w / 2 - 5)}" y="${n(py - fontSize - 3)}" width="${n(w + 10)}" height="${n(fontSize + 9)}" rx="3" fill="${esc(item.background)}"/>`);
+    }
+    if (item.box) {
+      put(`<rect x="${n(px - w / 2 - 7)}" y="${n(py - fontSize - 6)}" width="${n(w + 14)}" height="${n(fontSize + 12)}" rx="3" fill="none" stroke="${esc(item.color ?? theme.text)}" stroke-width="1.5"/>`);
+    }
+    // `paint-order: stroke` gives the halo under the glyphs in one element — the SVG equivalent of
+    // the canvas exporter's two-pass stroke-then-fill.
+    put(`<text x="${n(px)}" y="${n(py)}" fill="${esc(item.color ?? theme.text)}" stroke="${esc(item.background || haloBase)}" stroke-width="3" stroke-linejoin="round" paint-order="stroke" font-family="${esc(theme.fontText)}" font-size="${fontSize}" text-anchor="middle" dominant-baseline="central">${esc(item.text)}</text>`);
+  }
+
+  put('</svg>');
+  return out.join('\n');
+}
+
+/** Round to 2dp, so the file has no float noise and stays diffable. */
+function n(v: number): string {
+  return String(Math.round(v * 100) / 100);
+}
+
+/** Escape text for an XML text node or attribute value. */
+function esc(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 // ── the DOM-facing half ───────────────────────────────────────────────────────
 
-export type ImageKind = 'jpeg' | 'png';
+export type ImageKind = 'jpeg' | 'png' | 'svg';
+
+/** Whether a format can carry transparency. JPEG cannot, which is why it is never offered clear. */
+export function supportsTransparency(kind: ImageKind): boolean {
+  return kind !== 'jpeg';
+}
 
 /**
  * Render `chart` and save it beside `source`.
@@ -362,6 +542,15 @@ export async function exportChartImage(
   theme: ExportTheme,
   opts: ExportOptions = DEFAULT_EXPORT,
 ): Promise<TFile> {
+  if (kind === 'svg') {
+    // Text, not binary, so it goes through create() and stays diffable in git — which is the whole
+    // point of choosing SVG over a raster in the first place.
+    const path = availablePath(app, source, kind);
+    const written = await app.vault.create(path, buildChartSvg(chart, theme, opts));
+    if (!(written instanceof TFile)) throw new Error('unexpected file type');
+    return written;
+  }
+
   if (typeof document === 'undefined') {
     throw new Error('image export needs a document');
   }
@@ -397,12 +586,12 @@ function canvasToBlob(canvas: HTMLCanvasElement, kind: ImageKind, quality: numbe
 
 /** First free `<stem>.jpg`, `<stem>-2.jpg`, ... beside the source file. Never overwrites. */
 function availablePath(app: App, source: TFile, kind: ImageKind): string {
-  const ext = kind === 'jpeg' ? 'jpg' : 'png';
+  const ext = kind === 'jpeg' ? 'jpg' : kind;
   const dir = source.parent?.path ?? '';
   const base = `${dir ? `${dir}/` : ''}${source.basename}`;
   if (!app.vault.getAbstractFileByPath(`${base}.${ext}`)) return `${base}.${ext}`;
-  for (let n = 2; n < 1000; n += 1) {
-    const candidate = `${base}-${n}.${ext}`;
+  for (let n2 = 2; n2 < 1000; n2 += 1) {
+    const candidate = `${base}-${n2}.${ext}`;
     if (!app.vault.getAbstractFileByPath(candidate)) return candidate;
   }
   throw new Error('could not find a free filename for the export');

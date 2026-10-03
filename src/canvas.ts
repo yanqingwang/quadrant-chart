@@ -15,7 +15,7 @@ import { App, TFile } from 'obsidian';
 import { Axis, Chart, Item, LIMITS, DEFAULTS, clampNum, normalizeChart } from './model';
 import {
   Margins, PlotRect, DEFAULT_MARGINS,
-  axisTicks, cellCentre, cellRect, dataToScreenX, dataToScreenY, findCell, formatTick,
+  axisTicks, cellCentre, cellRect, dataToScreenX, dataToScreenY, estimateTextWidth, findCell, formatTick,
   screenToDataX, screenToDataY, splitPositions,
 } from './geometry';
 
@@ -68,6 +68,15 @@ export class ChartCanvas {
    * nobody benefits from.
    */
   private undoStack: string[] = [];
+  /**
+   * States that were undone, newest last.
+   *
+   * Separate from `undoStack` rather than derived from it: a snapshot stack holds states, not
+   * operations, so replaying forward means holding the states that were stepped off. Both stacks are
+   * cleared together whenever a genuinely new change is committed, which is what makes a redo that
+   * would replay an abandoned edit impossible rather than merely unlikely.
+   */
+  private redoStack: string[] = [];
   private static readonly UNDO_LIMIT = 100;
   private resizeObserver: ResizeObserver | null = null;
 
@@ -105,30 +114,80 @@ export class ChartCanvas {
    * Called BEFORE a change is applied, and only when one is actually about to happen. A snapshot
    * taken after the change would restore the change rather than undo it, and one taken for a no-op
    * would make undo appear to work while doing nothing.
+   *
+   * The redo stack is cleared here, not in the callers. Every committed change goes through this one
+   * method, so clearing it anywhere else would be a place to forget — and a redo that replays a
+   * change the user has since abandoned is worse than no redo at all.
    */
   pushUndo(): void {
     this.undoStack.push(JSON.stringify(this.chart));
     if (this.undoStack.length > ChartCanvas.UNDO_LIMIT) this.undoStack.shift();
+    this.redoStack = [];
   }
 
   /**
    * Step back one change. Returns false when there is nothing to undo.
    *
-   * Undoing does not push a snapshot, so the stack drains one step per press instead of ping-ponging
-   * between two states, and a fresh change after an undo discards the redo branch.
+   * The state being left behind goes onto the redo stack, so undo and redo are symmetric: either can
+   * be applied repeatedly and each hands the other what it gave up.
    */
   undo(): boolean {
     const prev = this.undoStack.pop();
     if (prev === undefined) return false;
-    let parsed: Chart | null = null;
-    try {
-      parsed = JSON.parse(prev) as Chart;
-    } catch {
-      // A snapshot we wrote ourselves, so this should never happen. Returning false is honest;
-      // silently restoring nothing would be the worse failure.
+    const restored = this.restoreFrom(prev);
+    if (!restored) {
+      // Put it back, or a single corrupt snapshot would silently swallow a step of history.
+      this.undoStack.push(prev);
       return false;
     }
-    this.chart = normalizeChart(parsed as unknown as Record<string, unknown>);
+    this.redoStack.push(JSON.stringify(this.chart));
+    this.chart = restored;
+    this.afterHistoryJump();
+    return true;
+  }
+
+  /** Replay the last undone change. Returns false when there is nothing to redo. */
+  redo(): boolean {
+    const next = this.redoStack.pop();
+    if (next === undefined) return false;
+    const restored = this.restoreFrom(next);
+    if (!restored) {
+      this.redoStack.push(next);
+      return false;
+    }
+    this.undoStack.push(JSON.stringify(this.chart));
+    this.chart = restored;
+    this.afterHistoryJump();
+    return true;
+  }
+
+  /** True when there is at least one step to undo. */
+  canUndo(): boolean {
+    return this.undoStack.length > 0;
+  }
+
+  /** True when there is at least one step to redo. */
+  canRedo(): boolean {
+    return this.redoStack.length > 0;
+  }
+
+  /**
+   * Parse a snapshot. Returns null rather than throwing, so a bad one fails the single step that used
+   * it instead of destroying the rest of the history.
+   */
+  private restoreFrom(snapshot: string): Chart | null {
+    try {
+      return normalizeChart(JSON.parse(snapshot) as unknown as Record<string, unknown>);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Settle the view after moving through history: drop any live drag, then reconcile the selection
+   * with whatever the restored chart contains, redraw, and persist.
+   */
+  private afterHistoryJump(): void {
     this.draft = null;
     // A selection can name something the restored chart no longer contains.
     if (this.selectedItem && !this.chart.items.some((i) => i.id === this.selectedItem)) {
@@ -140,12 +199,6 @@ export class ChartCanvas {
     }
     this.render();
     this.cb.onChange(this.chart);
-    return true;
-  }
-
-  /** True when there is at least one step to undo. */
-  canUndo(): boolean {
-    return this.undoStack.length > 0;
   }
 
   /**
@@ -154,6 +207,7 @@ export class ChartCanvas {
    */
   clearUndo(): void {
     this.undoStack = [];
+    this.redoStack = [];
   }
 
   getChart(): Chart {
@@ -840,39 +894,6 @@ function svg<K extends keyof SVGElementTagNameMap>(
 
 function inRect(p: { x: number; y: number }, r: PlotRect): boolean {
   return p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height;
-}
-
-/**
- * Roughly how wide a label will render, in px.
- *
- * Used only to size the click target, so it is deliberately generous — over-estimating costs a few
- * px of tolerance around the text, while under-estimating puts the edge of a long label outside its
- * own hit area, which is the bug this replaced.
- *
- * CJK and other full-width characters count as one em, Latin as about half, which is close enough
- * for a sans-serif UI face and needs no layout, which is the point: `getComputedTextLength` requires
- * the element to have been laid out, and this widget redraws synchronously before that happens.
- */
-function estimateTextWidth(text: string, fontSize: number): number {
-  let em = 0;
-  for (const ch of text) {
-    const c = ch.codePointAt(0) ?? 0;
-    // CJK, Hangul, Kana, fullwidth forms and CJK punctuation are all roughly one em wide.
-    const wide =
-      (c >= 0x1100 && c <= 0x115f) ||   // Hangul Jamo
-      (c >= 0x2e80 && c <= 0x303e) ||   // CJK radicals, Kangxi, punctuation
-      (c >= 0x3041 && c <= 0x33ff) ||   // Kana, Hangul compat, CJK compat
-      (c >= 0x3400 && c <= 0x4dbf) ||   // CJK ext A
-      (c >= 0x4e00 && c <= 0x9fff) ||   // CJK unified
-      (c >= 0xa000 && c <= 0xa4cf) ||   // Yi
-      (c >= 0xac00 && c <= 0xd7a3) ||   // Hangul syllables
-      (c >= 0xf900 && c <= 0xfaff) ||   // CJK compat ideographs
-      (c >= 0xff00 && c <= 0xff60) ||   // fullwidth forms
-      (c >= 0xffe0 && c <= 0xffe6);
-    em += wide ? 1 : 0.55;
-  }
-  // A minimum, so a single-character label is still comfortably clickable.
-  return Math.max(14, em * fontSize);
 }
 
 function round2(n: number): number {

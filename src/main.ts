@@ -11,6 +11,7 @@ import { App, Menu, MenuItem, Modal, Notice, Plugin, PluginSettingTab, Setting, 
 import { Chart, DEFAULTS, LIMITS, createChart, clampInt } from './model';
 import { chartToFileText, defaultBody } from './mdx';
 import { ChartTemplate, TEMPLATES } from './templates';
+import { ImageKind, supportsTransparency } from './exportImage';
 import { VIEW_TYPE_QUADRANT, QuadrantChartView } from './view';
 
 export interface QuadrantChartSettings {
@@ -215,25 +216,34 @@ export default class QuadrantChartPlugin extends Plugin {
    */
   pickExport(at: MouseEvent): void {
     const menu = new Menu();
-    menu.addItem((it: MenuItem) => it
-      .setSection('Export as')
-      .setTitle('JPG — smaller file')
-      .onClick(() => void this.runExport('jpeg')));
-    menu.addItem((it: MenuItem) => it
-      .setSection('Export as')
-      .setTitle('PNG — lossless, sharper text')
-      .onClick(() => void this.runExport('png')));
+    const kind = (label: string, detail: string, k: ImageKind, transparent = false) =>
+      menu.addItem((it: MenuItem) => it
+        .setSection('Export as')
+        .setTitle(`${label} \u2014 ${detail}`)
+        .onClick(() => void this.runExport(k, transparent)));
+
+    kind('JPG', 'smaller file', 'jpeg');
+    kind('PNG', 'lossless, sharper text', 'png');
+    kind('PNG', 'transparent background', 'png', true);
+    kind('SVG', 'vector, scales without blurring', 'svg');
+    kind('SVG', 'vector, transparent background', 'svg', true);
     menu.showAtMouseEvent(at);
   }
 
-  private async runExport(kind: 'jpeg' | 'png'): Promise<void> {
+  private async runExport(kind: ImageKind, transparent: boolean): Promise<void> {
     const view = this.chartView();
     if (!view) {
       new Notice('Open a chart first.');
       return;
     }
+    if (transparent && !supportsTransparency(kind)) {
+      // Unreachable through the menu; a guard rather than a trust, since it would silently produce a
+      // black image rather than an error.
+      new Notice(`${kind.toUpperCase()} cannot store transparency.`);
+      return;
+    }
     try {
-      const written = await view.exportImage(kind);
+      const written = await view.exportImage(kind, transparent);
       new Notice(`Saved ${written.path}`);
     } catch (err) {
       new Notice(`Could not export the chart: ${(err as Error).message}`);

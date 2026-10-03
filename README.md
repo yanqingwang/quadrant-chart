@@ -16,7 +16,8 @@ diff-friendly.
   it stays readable wherever it lands.
 - **Overlapping labels are reachable** — click the same spot again to step down through the stack, or
   use *Bring to front* / *Send to back*.
-- **Undo** — <kbd>Ctrl</kbd>+<kbd>Z</kbd> steps back any change, including an accidental drag.
+- **Undo and redo** — <kbd>Ctrl</kbd>+<kbd>Z</kbd> and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>
+  step through any change, including an accidental drag.
 - **Export** — save the chart as a JPG or PNG next to the `.mdx` file.
 - **Built-in examples** — a SWOT and a talent nine-box, creatable from the command palette.
 - **Your notes stay yours** — the chart is the YAML frontmatter; everything below it is free text the
@@ -57,8 +58,17 @@ always shows the current size. You can also drag a dashed split line on the canv
 
 **Name the axes / set the range** — **Axes** button, or click the X or Y caption on the canvas.
 
-**Export an image** — the **Export** button, or the command palette → *Export chart as image*. Choose
-JPG or PNG; the file is written beside the `.mdx` and never overwrites an existing one.
+**Export an image** — the **Export** button, or the command palette → *Export chart as image*.
+
+| Option | Notes |
+|---|---|
+| JPG | Smallest file. Always opaque — JPEG has no alpha channel. |
+| PNG | Lossless, sharper text. |
+| PNG, transparent | For slides and documents that supply their own background. |
+| SVG | Vector — scales to any size without blurring, and diffable in git. |
+| SVG, transparent | Same, with no background rectangle. |
+
+The file is written beside the `.mdx` and never overwrites an existing one.
 
 Everything you do is written straight to the file, so you can also just edit the YAML.
 
@@ -67,8 +77,11 @@ Everything you do is written straight to the file, so you can also just edit the
 | Shortcut | Action |
 |---|---|
 | <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Z</kbd> | Undo the last change to this chart |
+| <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> | Redo |
+| <kbd>Ctrl</kbd>+<kbd>Y</kbd> | Redo (Windows convention) |
 
-Redo is not offered — undo steps back one change at a time.
+A new change after an undo discards the redo branch, so redo can only replay something you have not
+since replaced.
 
 ## The `.mdx` format
 
@@ -194,7 +207,7 @@ pipeline of its own, but be aware of it if a vault ever gains a real MDX toolcha
 ```bash
 npm install
 npm run build     # typecheck + production bundle -> main.js
-npm test          # 328 tests: format, geometry, hit-testing, undo, image export, the
+npm test          # 377 tests: format, geometry, hit-testing, undo, image export, the
                   # save path, and interoperability with Script/mdx_chart.py
 ```
 

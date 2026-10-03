@@ -15,7 +15,9 @@ import { readChart, writeChart } from './mdx';
 import { ChartCanvas } from './canvas';
 import { PALETTE, promptColor, sameColor } from './colorUi';
 import { findCell } from './geometry';
-import { ImageKind, exportChartImage, resolveExportTheme } from './exportImage';
+import {
+  DEFAULT_EXPORT, ExportOptions, ImageKind, exportChartImage, resolveExportTheme,
+} from './exportImage';
 
 export const VIEW_TYPE_QUADRANT = 'quadrant-chart-view';
 
@@ -78,28 +80,33 @@ export class QuadrantChartView extends FileView {
   }
 
   /**
-   * Ctrl/Cmd+Z.
+   * Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (also Ctrl+Y).
    *
    * Obsidian's own undo stack covers the markdown editor, which a canvas edit never touches — the
    * plugin writes the file directly. Without this, the standard undo shortcut does nothing while the
    * chart view is focused, which reads as the keyboard being broken rather than as a missing feature.
    */
   private onKeyDown = (evt: KeyboardEvent): void => {
-    if (!(evt.ctrlKey || evt.metaKey) || evt.key.toLowerCase() !== 'z') return;
+    if (!(evt.ctrlKey || evt.metaKey)) return;
+    const key = evt.key.toLowerCase();
+
+    // Ctrl+Y is the Windows convention for redo; Obsidian users on other platforms expect
+    // Ctrl+Shift+Z, so both are accepted rather than picking one and surprising the other half.
+    const isRedo = (key === 'z' && evt.shiftKey) || key === 'y';
+    const isUndo = key === 'z' && !evt.shiftKey;
+    if (!isRedo && !isUndo) return;
+
     evt.preventDefault();
     evt.stopPropagation();
-    if (evt.shiftKey) {
-      // Redo is deliberately not offered: a snapshot stack holds states, not operations, so replaying
-      // forward would need a second stack. Saying so beats a shortcut that silently does nothing.
-      new Notice('Redo is not available — undo steps back one change at a time.');
+
+    const canvas = this.canvas;
+    if (!canvas) return;
+    const ok = isRedo ? canvas.redo() : canvas.undo();
+    if (!ok) {
+      new Notice(isRedo ? 'Nothing to redo' : 'Nothing to undo');
       return;
     }
-    if (!this.canvas?.canUndo()) {
-      new Notice('Nothing to undo');
-      return;
-    }
-    this.canvas.undo();
-    this.chart = this.canvas.getChart();
+    this.chart = canvas.getChart();
     this.renderToolbar();
   };
 
@@ -348,10 +355,16 @@ export class QuadrantChartView extends FileView {
    * The theme is read from the live canvas element rather than hard-coded, so an export matches the
    * light or dark mode the user is actually looking at instead of assuming white.
    */
-  async exportImage(kind: ImageKind): Promise<TFile> {
+  async exportImage(kind: ImageKind, transparent = false): Promise<TFile> {
     const theme = resolveExportTheme(this.contentEl);
     if (!this.file) throw new Error('this view is not bound to a file');
-    return exportChartImage(this.app, this.chart, this.file, kind, theme);
+    // A transparent export drops the background fill rather than making it white, so the alpha
+    // channel is actually absent instead of merely looking light.
+    const opts: ExportOptions = {
+      ...DEFAULT_EXPORT,
+      background: transparent ? null : theme.background,
+    };
+    return exportChartImage(this.app, this.chart, this.file, kind, theme, opts);
   }
 
   private button(parent: HTMLElement, label: string, icon: string, title: string, onClick: (e: MouseEvent) => void): void {

@@ -245,7 +245,10 @@ describe('label backgrounds and boxes are exported', () => {
 });
 
 describe('text wrapping', () => {
-  const ctx = (t: string) => ({ measureText: (s: string) => ({ width: String(s).length * 10 }) } as unknown as CanvasRenderingContext2D);
+  // wrapText now takes a measurer function rather than a context, so the SVG exporter can share the
+  // same wrapping rule without a canvas. Fixed 10px per character keeps the expected line breaks
+  // exact and independent of any font.
+  const ctx = (_: string) => (t: string) => String(t).length * 10;
 
   it('breaks Latin at spaces', () => {
     // 10px per character, so 100px fits 10. Comfortably enough for 'wonderful' (9) but not for

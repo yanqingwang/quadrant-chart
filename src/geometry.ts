@@ -12,6 +12,41 @@
 
 import { Axis, Chart, Grid, LIMITS, clampNum } from './model';
 
+/**
+ * Roughly how wide a string will render, in px, for a given font size.
+ *
+ * Shared by the canvas (to size a label's click target) and the exporters (to wrap cell notes), so
+ * both agree on where a piece of text ends. It is an estimate rather than a measurement because
+ * `getComputedTextLength` requires the element to have been laid out, and the canvas redraws
+ * synchronously before that happens; the SVG exporter has no laid-out element at all.
+ *
+ * Deliberately generous: over-estimating costs a few px of tolerance around text, while
+ * under-estimating puts the edge of a label outside its own hit area — the bug this replaced.
+ *
+ * CJK and other full-width characters count as one em, Latin as about half, which is close enough
+ * for a sans-serif UI face.
+ */
+export function estimateTextWidth(text: string, fontSize: number): number {
+  let em = 0;
+  for (const ch of text) {
+    const c = ch.codePointAt(0) ?? 0;
+    const wide =
+      (c >= 0x1100 && c <= 0x115f) ||   // Hangul Jamo
+      (c >= 0x2e80 && c <= 0x303e) ||   // CJK radicals, Kangxi, punctuation
+      (c >= 0x3041 && c <= 0x33ff) ||   // Kana, Hangul compat, CJK compat
+      (c >= 0x3400 && c <= 0x4dbf) ||   // CJK ext A
+      (c >= 0x4e00 && c <= 0x9fff) ||   // CJK unified
+      (c >= 0xa000 && c <= 0xa4cf) ||   // Yi
+      (c >= 0xac00 && c <= 0xd7a3) ||   // Hangul syllables
+      (c >= 0xf900 && c <= 0xfaff) ||   // CJK compat ideographs
+      (c >= 0xff00 && c <= 0xff60) ||   // fullwidth forms
+      (c >= 0xffe0 && c <= 0xffe6);
+    em += wide ? 1 : 0.55;
+  }
+  // A minimum, so a single-character label is still comfortably clickable.
+  return Math.max(14, em * fontSize);
+}
+
 /** Screen rectangle of the plot area, excluding axis labels and the surrounding chrome. */
 export interface PlotRect {
   x: number;
