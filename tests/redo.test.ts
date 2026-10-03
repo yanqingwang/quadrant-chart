@@ -27,8 +27,7 @@ function build(chart: Chart) {
   Object.defineProperty(container, 'clientHeight', { value: 600, configurable: true });
   document.body.appendChild(container);
   const changes: Chart[] = [];
-  const canvas = new ChartCanvas({} as never, container, chart, {
-    file: FILE,
+  const canvas = new ChartCanvas(container, chart, {
     onChange: (c) => changes.push(c),
     onSelectCell: () => undefined,
     promptText: async (d) => d,
@@ -46,8 +45,7 @@ function answering(chart: Chart, answer: string) {
   Object.defineProperty(container, 'clientWidth', { value: 800, configurable: true });
   Object.defineProperty(container, 'clientHeight', { value: 600, configurable: true });
   document.body.appendChild(container);
-  const canvas = new ChartCanvas({} as never, container, chart, {
-    file: FILE, onChange: () => undefined, onSelectCell: () => undefined,
+  const canvas = new ChartCanvas(container, chart, { onChange: () => undefined, onSelectCell: () => undefined,
     promptText: async () => answer,
   });
   canvas.measure();

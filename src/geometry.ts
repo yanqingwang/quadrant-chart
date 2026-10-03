@@ -66,21 +66,12 @@ export interface Margins {
 export const DEFAULT_MARGINS: Margins = { left: 64, right: 24, top: 32, bottom: 56 };
 
 /** Uniform scale factor for the given plot rect, clamped so a collapsed pane cannot divide by ~0. */
-function span(rect: PlotRect): { sx: number; sy: number } {
-  return {
-    sx: rect.width / LIMITS.minSpan,
-    sy: rect.height / LIMITS.minSpan,
-  };
-}
-
 export function dataToScreenX(value: number, axis: Axis, rect: PlotRect): number {
-  const { sx } = span(rect);
   const t = (value - axis.min) / (axis.max - axis.min || 1);
   return rect.x + t * rect.width;
 }
 
 export function dataToScreenY(value: number, axis: Axis, rect: PlotRect): number {
-  const { sy } = span(rect);
   // Inverted: higher data-y is higher on screen, which means a smaller SVG y.
   const t = (value - axis.min) / (axis.max - axis.min || 1);
   return rect.y + rect.height - t * rect.height;

@@ -554,6 +554,9 @@ export async function exportChartImage(
   if (typeof document === 'undefined') {
     throw new Error('image export needs a document');
   }
+  // A canvas is a real HTML element, not an SVG node. Obsidian's `createEl` would also work but is
+  // not available here: this module runs outside a view and takes no HTMLElement to hang one off.
+  /* eslint-disable-next-line obsidianmd/prefer-create-el */
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(opts.width * opts.scale);
   canvas.height = Math.round(opts.height * opts.scale);

@@ -23,8 +23,7 @@ function build(chart: Chart) {
   Object.defineProperty(container, 'clientHeight', { value: 600, configurable: true });
   document.body.appendChild(container);
   const changes: Chart[] = [];
-  const canvas = new ChartCanvas({} as never, container, chart, {
-    file: FILE,
+  const canvas = new ChartCanvas(container, chart, {
     onChange: (c) => changes.push(c),
     onSelectCell: () => undefined,
     promptText: async (d) => d,
@@ -191,8 +190,7 @@ describe('a label can be edited', () => {
     Object.defineProperty(container, 'clientHeight', { value: 600, configurable: true });
     document.body.appendChild(container);
     const changes: Chart[] = [];
-    const canvas = new ChartCanvas({} as never, container, { ...c, items: [{ id: 'a', text: 'Before', x: 1, y: 1 }] }, {
-      file: FILE,
+    const canvas = new ChartCanvas(container, { ...c, items: [{ id: 'a', text: 'Before', x: 1, y: 1 }] }, {
       onChange: (ch) => changes.push(ch),
       onSelectCell: () => undefined,
       promptText: async () => 'After',
@@ -210,10 +208,9 @@ describe('a label can be edited', () => {
     Object.defineProperty(container, 'clientWidth', { value: 800, configurable: true });
     Object.defineProperty(container, 'clientHeight', { value: 600, configurable: true });
     document.body.appendChild(container);
-    const canvas = new ChartCanvas({} as never, container, {
+    const canvas = new ChartCanvas(container, {
       ...c, items: [{ id: 'a', text: 'Before', x: 1, y: 1, background: '#fdd663', box: true }],
     }, {
-      file: FILE,
       onChange: () => undefined,
       onSelectCell: () => undefined,
       promptText: async () => 'After',

@@ -168,21 +168,20 @@ export function extractBody(text: string): string {
  * after it — the user's prose — is carried across untouched.
  */
 export async function writeChart(app: App, file: TFile, chart: Chart): Promise<void> {
+  await app.vault.process(file, (text) => spliceFrontmatter(text, chart));
+  // Confirm the write landed rather than trusting the call — this plugin has been bitten by a write
+  // API that resolves successfully and changes nothing, and re-reading is the only way to tell.
+  //
+  // Isolated in its own try/catch so a failure to VERIFY is never reported as a failed save when the
+  // save itself worked; only a genuine mismatch propagates.
   try {
-    await app.vault.process(file, (text) => spliceFrontmatter(text, chart));
-    // Confirm the write landed rather than trusting the call. Isolated in its own try/catch: a
-    // failure here must never be reported as a failed save when the save itself succeeded.
-    try {
-      const after = await app.vault.read(file);
-      const reparsed = parseChartFromText(after);
-      if (reparsed && reparsed.items.length !== chart.items.length) {
-        throw new Error(`save verification failed: wrote ${chart.items.length} labels but the file has ${reparsed.items.length}`);
-      }
-    } catch (e) {
-      if ((e as Error).message.startsWith('save verification failed')) throw e;
+    const after = await app.vault.read(file);
+    const reparsed = parseChartFromText(after);
+    if (reparsed && reparsed.items.length !== chart.items.length) {
+      throw new Error(`save verification failed: wrote ${chart.items.length} labels but the file has ${reparsed.items.length}`);
     }
-  } catch (err) {
-    throw err;
+  } catch (e) {
+    if ((e as Error).message.startsWith('save verification failed')) throw e;
   }
 }
 
@@ -199,7 +198,7 @@ export async function writeChart(app: App, file: TFile, chart: Chart): Promise<v
  * guessing where it was meant to end would risk eating real content).
  */
 export function spliceFrontmatter(text: string, chart: Chart): string {
-  const yaml = stringifyYaml(chartToFrontmatter(chart) as Record<string, unknown>).replace(/\n+$/, '');
+  const yaml = stringifyYaml(chartToFrontmatter(chart)).replace(/\n+$/, '');
   const lines = text.split('\n');
 
   let i = 0;
@@ -227,7 +226,7 @@ export function spliceFrontmatter(text: string, chart: Chart): string {
 
 /** Full file text for a new chart, frontmatter plus an optional body. */
 export function chartToFileText(chart: Chart, body = ''): string {
-  const fm = stringifyYaml(chartToFrontmatter(chart) as Record<string, unknown>);
+  const fm = stringifyYaml(chartToFrontmatter(chart));
   const trimmed = body.trim();
   return `---\n${fm}---\n${trimmed ? `\n${trimmed}\n` : ''}`;
 }

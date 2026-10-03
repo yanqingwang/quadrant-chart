@@ -11,7 +11,6 @@
  * bug where a label renders in a position the file no longer records.
  */
 
-import { App, TFile } from 'obsidian';
 import { Axis, Chart, Item, LIMITS, DEFAULTS, clampNum, normalizeChart } from './model';
 import {
   Margins, PlotRect, DEFAULT_MARGINS,
@@ -32,8 +31,6 @@ export interface CanvasCallbacks {
   onChange(chart: Chart): void;
   /** Ask the host to prompt for text (new label, rename, cell name). */
   promptText(defaultValue: string, title: string): Promise<string | null>;
-  /** The file this canvas edits, for error surfaces. */
-  file: TFile;
   /** Called when the user clicks a cell, so the toolbar can act on the chosen one. */
   onSelectCell?(col: number, row: number): void;
   /**
@@ -90,7 +87,6 @@ export class ChartCanvas {
   private resizeObserver: ResizeObserver | null = null;
 
   constructor(
-    private readonly app: App,
     private container: HTMLElement,
     private chart: Chart,
     private readonly cb: CanvasCallbacks,
@@ -518,6 +514,31 @@ private svgPoint(evt: { clientX: number; clientY: number }): { x: number; y: num
 
   private onPointerDown = (evt: PointerEvent): void => {
     const target = evt.target as Element;
+
+    // Right-click deletes, handled on POINTERDOWN rather than on `contextmenu`.
+    //
+    // Obsidian registers a capture-phase listener on `window` that calls
+    // `preventDefault()` AND `stopImmediatePropagation()` on every *trusted* contextmenu event. A
+    // capture listener on the window runs before the event reaches this SVG, so a `contextmenu`
+    // handler here can never fire in the real app — the hit test still resolves (which is why the
+    // cursor changes and the feature looks alive) but no deletion happens.
+    //
+    // Worse, that guard is `e.isTrusted`, and every synthetic event a test dispatches is untrusted.
+    // So a jsdom test of a `contextmenu` handler passes while the feature is dead on screen. That is
+    // exactly what happened: 390 green tests and a right-click that did nothing.
+    //
+    // `pointerdown` is not intercepted, and the right button sets `button === 2`. Dragging already
+    // depends on pointerdown reaching here, so this is the same path that is known to work.
+    if (evt.button === 2) {
+      const rightId = target.closest?.('.qc-item')?.getAttribute('data-item-id');
+      if (rightId) {
+        evt.preventDefault();
+        this.removeItem(rightId);
+      }
+      return;   // never start a drag from a non-primary button
+    }
+    if (evt.button !== 0) return;
+
     const itemId = target.closest?.('.qc-item')?.getAttribute('data-item-id');
     if (itemId) {
       const p = this.svgPoint(evt);
@@ -680,6 +701,13 @@ private svgPoint(evt: { clientX: number; clientY: number }): { x: number; y: num
     else void this.renameAxis(axis);
   };
 
+  /**
+   * Fallback for hosts that do NOT swallow `contextmenu`.
+   *
+   * Obsidian does swallow it (capture-phase, `stopImmediatePropagation`, trusted events only), so in
+   * practice the deletion has already happened in `onPointerDown`. `removeItem` refuses an id that is
+   * no longer present, so the two paths cannot delete twice.
+   */
   private onContextMenu = (evt: MouseEvent): void => {
     const target = evt.target as Element;
     const id = target.closest?.('.qc-item')?.getAttribute('data-item-id');
@@ -895,11 +923,24 @@ private svgPoint(evt: { clientX: number; clientY: number }): { x: number; y: num
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
+/**
+ * Create an SVG child element and append it to `parent`.
+ *
+ * `document.createElementNS` is required and is NOT interchangeable with Obsidian's `createEl` here.
+ * `createEl` is typed to `keyof HTMLElementTagNameMap` and creates an element in the HTML namespace,
+ * so an SVG built with it would not render — the tag would be in the wrong namespace entirely.
+ * Obsidian's `createSvg` is no help either: it makes a standalone `<svg>` with no parent argument,
+ * and this needs children of an existing `<svg>` or `<g>`.
+ *
+ * The `prefer-create-el` lint rule is therefore a false positive on these three lines.
+ */
+/* eslint-disable-next-line obsidianmd/prefer-create-el */
 function svg<K extends keyof SVGElementTagNameMap>(
   parent: SVGElement,
   tag: K,
   attrs: Record<string, string | number> = {},
 ): SVGElementTagNameMap[K] {
+  /* eslint-disable-next-line obsidianmd/prefer-create-el */
   const el = document.createElementNS(SVG_NS, tag);
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
   parent.appendChild(el);

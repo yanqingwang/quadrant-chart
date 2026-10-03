@@ -61,14 +61,14 @@ export default class QuadrantChartPlugin extends Plugin {
     );
 
     this.addCommand({
-      id: 'create-quadrant-chart',
-      name: 'Create quadrant chart',
+      id: 'create-chart',
+      name: 'Create a blank chart',
       callback: () => void this.createChartCommand(),
     });
 
     this.addCommand({
-      id: 'create-quadrant-chart-from-template',
-      name: 'Create quadrant chart from example',
+      id: 'create-from-example',
+      name: 'Create from a worked example',
       // Obsidian types `callback` as taking no arguments, so the click position has to be read off
       // the window's last event rather than taken as a parameter. The menu is anchored there, so
       // it appears under the cursor when invoked by mouse and near the centre when by keyboard.
@@ -76,14 +76,14 @@ export default class QuadrantChartPlugin extends Plugin {
     });
 
     this.addCommand({
-      id: 'export-chart-image',
-      name: 'Export chart as image',
+      id: 'export-image',
+      name: 'Export as an image',
       callback: () => void this.pickExport(lastPointerEvent()),
     });
 
     this.addCommand({
-      id: 'open-quadrant-chart',
-      name: 'Open quadrant chart',
+      id: 'open-chart',
+      name: 'Open the active chart',
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
         if (!file || file.extension !== 'mdx') return false;
@@ -93,10 +93,6 @@ export default class QuadrantChartPlugin extends Plugin {
     });
 
     this.addSettingTab(new QuadrantChartSettingTab(this.app, this));
-  }
-
-  onunload(): void {
-    this.app.workspace.detachLeavesOfType(VIEW_TYPE_QUADRANT);
   }
 
   async loadSettings(): Promise<void> {

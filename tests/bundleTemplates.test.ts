@@ -74,8 +74,11 @@ describe('the built bundle carries the examples', () => {
   });
 
   it('registers the command-palette entry', () => {
-    expect(decoded).toContain('create-quadrant-chart-from-template');
-    expect(decoded).toContain('Create quadrant chart from example');
+    // Obsidian's review checklist: a command id must not repeat the plugin id (it is prefixed
+    // automatically), and the command name must not repeat the plugin name (it is shown beside it).
+    expect(decoded).toContain('create-from-example');
+    expect(decoded).toContain('Create from a worked example');
+    expect(decoded).not.toContain('create-quadrant-chart');
   });
 
   it('does not leave templates as an external module', () => {

@@ -26,10 +26,10 @@ diff-friendly.
 
 ## Using it
 
-**Create a chart** — command palette → *Create quadrant chart*. Pick a name and it opens straight
+**Create a chart** — command palette → *Create a blank chart*. Pick a name and it opens straight
 into the editor.
 
-**Start from an example** — command palette → *Create quadrant chart from example* → SWOT or talent
+**Start from an example** — command palette → *Create from a worked example* → SWOT or talent
 nine-box. You get the cells, colours, labels and an explanatory body to edit.
 
 **Add text** — double-click anywhere on the plot, or use the *Add label* button. With nothing
@@ -58,7 +58,7 @@ always shows the current size. You can also drag a dashed split line on the canv
 
 **Name the axes / set the range** — **Axes** button, or click the X or Y caption on the canvas.
 
-**Export an image** — the **Export** button, or the command palette → *Export chart as image*.
+**Export an image** — the **Export** button, or the command palette → *Export as an image*.
 
 | Option | Notes |
 |---|---|

@@ -10,7 +10,7 @@
 //   2. a reload whose result equals what we already hold must be a no-op, so a self-write that
 //      comes back around cannot revert anything regardless of when the event fires.
 import { parseChartFromText, chartToFileText, chartToFrontmatter } from '../src/mdx';
-import { parseYaml } from 'obsidian';
+import { parseYaml, stringifyYaml } from 'obsidian';
 import { createChart, Chart } from '../src/model';
 
 const AXES_BODY = `quadrant-chart: 1
@@ -145,11 +145,12 @@ describe('serialised writes cannot lose an update', () => {
 
   it('round-trips through real YAML the way processFrontMatter writes it', () => {
     // processFrontMatter replaces the block wholesale, so the object it is handed must be complete
-    // on its own. Verifying via js-yaml mirrors what Obsidian does internally.
+    // on its own. Verifying through the same stringifyYaml the plugin writes with, rather than a
+    // second YAML library, so this exercises the real serialisation path.
     const chart = createChart(2, 2);
     chart.items = [{ id: 'a', text: 'Keep me', x: 8, y: 9 }];
     const yaml = chartToFrontmatter(chart) as Record<string, unknown>;
-    const reparsed = parseChartFromText(`---\n${require('js-yaml').dump(yaml)}---\n`);
+    const reparsed = parseChartFromText(`---\n${stringifyYaml(yaml)}---\n`);
     expect(reparsed!.items.map((i) => i.text)).toEqual(['Keep me']);
   });
 });
@@ -168,6 +169,6 @@ describe('the written file always contains what the user sees', () => {
 
   it('does not write a title that was never set', () => {
     const fm = chartToFrontmatter(createChart(2, 2)) as Record<string, unknown>;
-    expect(parseYaml(require('js-yaml').dump(fm))).not.toHaveProperty('title');
+    expect(parseYaml(stringifyYaml(fm))).not.toHaveProperty('title');
   });
 });

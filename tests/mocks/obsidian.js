@@ -2,14 +2,14 @@
  * Jest stubs for the `obsidian` module. The real package is a type-only facade at runtime (it needs
  * Electron), so anything under test has to be given a working substitute.
  *
- * `parseYaml` / `stringifyYaml` delegate to js-yaml so the .mdx tests exercise the same
+ * `parseYaml` / `stringifyYaml` delegate to the `yaml` package so the .mdx tests exercise the same
  * serialisation Obsidian performs rather than a hand-written imitation that could drift.
  *
  * `FileView` exists so the VIEW LIFECYCLE can be tested. That lifecycle is the plugin's highest-risk
  * surface — a wrong hook means edits silently never reach disk — and it cannot be checked by
  * reading types alone, because the types say what is allowed, not when the framework calls it.
  */
-const yaml = require('js-yaml');
+const YAML = require('yaml');
 
 class TFile {
   constructor(path, content = '') {
@@ -149,8 +149,10 @@ function setIcon(el) { el.textContent = '*'; }
 function normalizePath(p) { return p.replace(/\\/g, '/').replace(/\/+/g, '/'); }
 
 module.exports = {
-  parseYaml: (t) => yaml.load(t),
-  stringifyYaml: (o) => yaml.dump(o, { lineWidth: -1 }),
+  // `yaml` rather than js-yaml: Obsidian flags the latter as unmaintained, and this mock only has to
+  // behave like Obsidian's parseYaml/stringifyYaml closely enough for the format tests.
+  parseYaml: (t) => YAML.parse(t),
+  stringifyYaml: (o) => YAML.stringify(o, { lineWidth: 0 }),
   TFile, TFolder, Notice, Menu, Modal, FileView, ItemView, setIcon, normalizePath,
   Platform: { isMobile: false, isDesktop: true },
 };

@@ -86,9 +86,9 @@ export interface Chart {
 
 /** Document defaults applied when a chart omits a field. */
 export const DEFAULTS = {
-  xAxis: { label: 'X axis', min: 0, max: 10 } as Axis,
-  yAxis: { label: 'Y axis', min: 0, max: 10 } as Axis,
-  grid: { columns: 2, rows: 2 } as Grid,
+  xAxis: { label: 'X axis', min: 0, max: 10 },
+  yAxis: { label: 'Y axis', min: 0, max: 10 },
+  grid: { columns: 2, rows: 2 },
   baseFontSize: 14,
 } as const;
 

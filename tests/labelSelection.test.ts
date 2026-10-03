@@ -28,8 +28,7 @@ function build(chart: Chart) {
   Object.defineProperty(container, 'clientHeight', { value: 600, configurable: true });
   document.body.appendChild(container);
   const cells: [number, number][] = [];
-  const canvas = new ChartCanvas({} as never, container, chart, {
-    file: FILE,
+  const canvas = new ChartCanvas(container, chart, {
     onChange: () => undefined,
     onSelectCell: (col, row) => cells.push([col, row]),
     promptText: async (def) => def,

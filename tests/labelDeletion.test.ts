@@ -214,8 +214,7 @@ describe('deleting fires exactly once', () => {
     document.body.appendChild(container);
     const changes: unknown[] = [];
     const chart = { ...createBlank(), items: [{ id: 'a', text: 'Label', x: 5, y: 5 }] };
-    const canvas = new ChartCanvas({} as never, container, chart, {
-      file: { path: 'c.mdx' } as never,
+    const canvas = new ChartCanvas(container, chart, {
       onChange: (c) => changes.push(c),
       onSelectCell: () => undefined,
       promptText: async (d) => d,

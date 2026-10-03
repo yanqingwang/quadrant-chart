@@ -25,8 +25,7 @@ function build(chart: Chart) {
 
   const changes: Chart[] = [];
   const prompts: string[] = [];
-  const canvas = new ChartCanvas({} as never, container, chart, {
-    file: FILE,
+  const canvas = new ChartCanvas(container, chart, {
     onChange: (c) => changes.push(c),
     onSelectCell: () => undefined,
     promptText: async (def) => { prompts.push(def); return 'typed name'; },

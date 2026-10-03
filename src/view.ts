@@ -10,7 +10,7 @@
 
 import { FileView, Menu, MenuItem, Notice, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
 import QuadrantChartPlugin from './main';
-import { Chart, Cell, Item, createChart, LIMITS, DEFAULTS } from './model';
+import { Chart, Cell, createChart, LIMITS, DEFAULTS } from './model';
 import { readChart, writeChart } from './mdx';
 import { ChartCanvas } from './canvas';
 import { PALETTE, promptColor, sameColor } from './colorUi';
@@ -185,8 +185,9 @@ export class QuadrantChartView extends FileView {
     this.toolbarEl = toolbar;
 
     const stage = this.contentEl.createDiv({ cls: 'qc-stage' });
-    this.canvas = new ChartCanvas(this.app, stage, this.chart, {
-      file: this.file as TFile,
+    // No app and no file: the canvas renders and edits a model, and reports changes through the
+    // callbacks. It had carried an App and a TFile that nothing ever read.
+    this.canvas = new ChartCanvas(stage, this.chart, {
       onChange: (chart) => void this.commit(chart),
       promptText: (def, title) => this.plugin.promptText(def, title),
       // Repaint the toolbar so the Cell button names the cell the user just clicked. Without this
@@ -230,7 +231,7 @@ export class QuadrantChartView extends FileView {
       (e) => this.pickLabel(e));
     this.button(bar, 'Axes', 'axis', 'Rename the axes and set their ranges', (e) => this.pickAxes(e));
     this.button(bar, 'Title', 'type', 'Set the chart title', () => void this.promptTitle());
-    this.button(bar, 'Export', 'image-file', 'Save the chart as an image file', (e) => this.plugin.pickExport(e));
+    this.button(bar, 'Export', 'image-file', 'Save the chart as an image file', (e) => void this.plugin.pickExport(e));
   }
 
   /**
