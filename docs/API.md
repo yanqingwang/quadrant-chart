@@ -39,6 +39,8 @@ items:
     text: Rework the sync engine
     x: 8.2
     y: 9
+    background: "#fdd663"   # optional plate behind the text
+    box: true                # optional outline around it
 ---
 
 Everything below the frontmatter is never touched by the plugin or the script.
@@ -73,6 +75,8 @@ Everything below the frontmatter is never touched by the plugin or the script.
 | `items[].text` | string | **yes** | Empty/whitespace-only items are dropped on open. |
 | `items[].x` / `.y` | number | **yes** | Data-space position. |
 | `items[].color` | `#rrggbb` | no | Label colour; defaults to the theme's text colour. |
+| `items[].background` | `#rrggbb` | no | Plate drawn behind the text. Omitted when unset. |
+| `items[].box` | boolean | no | Outline around the label. **Written only when `true`** — `box: false` is not stored, to keep diffs quiet. Only a real boolean is read; a quoted `"false"` string is ignored rather than being treated as truthy. |
 | `items[].size` | int | no | Font size in px (8–96). |
 | `base-font-size` | int | no | Default label size; omitted when 14. |
 
@@ -106,8 +110,16 @@ chart.add_cell(1, 0, "Threats",       color="orange", note="External · harmful"
 chart.add_item("Content-hash sync", x=-3.4, y=4.2, item_id="s1")
 chart.add_item("Silent save bug",  x=-4.2, y=-3.2, item_id="w1")
 
+# A label can carry its own background plate and outline, so it stays readable wherever it lands.
+chart.add_item("Highest risk", x=3.5, y=-2.0, item_id="t1",
+               background="red", box=True)
+
 chart.save("SWOT.mdx", body="# Notes\n\nThis body is never rewritten.\n")
 ```
+
+> **The body is replaced, never appended.** `load()` returns the body and `save()` writes it back, so
+> a script that appends instead duplicates the notes on every edit. `Script/tests_mdx_chart.py` pins
+> this — it is not hypothetical: a real example file here once accumulated four copies.
 
 ### Read and update
 
@@ -137,7 +149,7 @@ print(chart.quadrant_of(-3.4, 4.2))   # (0, 1)
 | `Chart.blank(columns=2, rows=2, title=None)` | Defaults, nothing else. |
 | `Axis(label, minimum, maximum, ticks=None)` | One axis. |
 | `chart.add_cell(col, row, label=None, color=None, note=None)` | Create/replace a cell. **Raises** if the address is outside the grid. |
-| `chart.add_item(text, x, y, color=None, size=None, item_id=None)` | Add a label. Out-of-range coords are clamped with a warning on stderr. **Raises** on empty text or duplicate `item_id`. |
+| `chart.add_item(text, x, y, color=None, size=None, item_id=None, background=None, box=None)` | Add a label. Out-of-range coords are clamped with a warning on stderr. **Raises** on empty text or duplicate `item_id`. |
 | `chart.remove_item(needle)` | Delete by substring. Returns `bool`. |
 | `chart.set_grid(columns, rows)` | Resize; drops cells that fall outside. |
 | `chart.quadrant_of(x, y)` | Which cell contains a point. |
@@ -169,6 +181,10 @@ python3 Script/mdx_chart.py create --path Q1.mdx --title "Q1 Priorities" \
 
 # Add a label
 python3 Script/mdx_chart.py add-item --path Q1.mdx --text "Rework sync engine" --x 8.2 --y 9
+
+# ... with a background plate and an outline (palette name or hex)
+python3 Script/mdx_chart.py add-item --path Q1.mdx --text "Highest risk" --x 8 --y 1 \
+    --background red --box
 
 # Name and colour a cell
 python3 Script/mdx_chart.py set-cell --path Q1.mdx --col 1 --row 1 --label "Do now" --color red
