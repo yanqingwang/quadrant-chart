@@ -27,9 +27,14 @@ import { App, TFile } from 'obsidian';
 import { Chart, DEFAULTS, LIMITS, clampNum } from './model';
 import {
   Margins, DEFAULT_MARGINS,
-  axisTicks, cellRect, dataToScreenX, dataToScreenY, estimateTextWidth, findCell, formatTick,
-  splitPositions,
+  TextMeasurer, axisTicks, cellRect, dataToScreenX, dataToScreenY, estimateTextWidth, findCell,
+  formatTick, labelBlockHeight, labelLines, splitPositions, wrapText,
+  LABEL_LINE_RATIO, screenToDataY,
 } from './geometry';
+
+export { wrapText } from './geometry';
+export type { TextMeasurer } from './geometry';
+import { CELL_FILL_ALPHA, labelHalo } from './colorUi';
 
 /** Colours and fonts resolved from the current theme, so an export follows light/dark mode. */
 export interface ExportTheme {
@@ -58,11 +63,23 @@ export interface ExportOptions {
    * a caller who forgets is a caller whose JPEG comes out with whatever the canvas held.
    */
   background: string | null;
+  /**
+   * Widest a free label may be, as a share of the plot area, before it wraps. Mirrors the plugin
+   * setting of the same name so the exported file matches what the user was looking at.
+   */
+  labelWidthPercent?: number;
 }
 
 export const DEFAULT_EXPORT: ExportOptions = {
   width: 1400, height: 900, scale: 2, quality: 0.92, background: '#ffffff',
+  labelWidthPercent: 80,
 };
+
+/** Widest a free label may be, in pixels. Same rule as the on-screen canvas, same setting. */
+function labelMaxWidth(plotWidth: number, opts: ExportOptions): number {
+  const pct = clampNum(opts.labelWidthPercent ?? 80, LIMITS.minLabelWidthPercent, 100, 80);
+  return Math.max(1, (plotWidth * pct) / 100);
+}
 
 /** Read the theme from a live element, so the export matches what the user is looking at. */
 export function resolveExportTheme(el: Element | null): ExportTheme {
@@ -94,7 +111,6 @@ const NOTE_LINE_HEIGHT = 1.35;
 const TICK_SIZE = 11;
 
 /** How wide a piece of text is, in px. All wrapping is expressed through this one function. */
-export type TextMeasurer = (text: string) => number;
 
 /**
  * Draw the whole chart.
@@ -137,7 +153,7 @@ export function renderChartToCanvas(
   drawGrid(ctx, chart, plot, theme);
   drawFrame(ctx, plot, theme);
   drawAxes(ctx, chart, plot, theme);
-  drawItems(ctx, chart, plot, theme, opts.background);
+  drawItems(ctx, chart, plot, theme, opts.background, opts);
   ctx.restore();
 }
 
@@ -151,7 +167,7 @@ function drawCells(ctx: CanvasRenderingContext2D, chart: Chart, plot: ReturnType
       if (cell.color) {
         ctx.save();
         // 18% to match the on-screen fill, so an exported chart looks like the one on screen.
-        ctx.globalAlpha = 0.18;
+        ctx.globalAlpha = CELL_FILL_ALPHA;
         ctx.fillStyle = cell.color;
         ctx.fillRect(r.x, r.y, r.width, r.height);
         ctx.restore();
@@ -273,8 +289,9 @@ function drawAxes(ctx: CanvasRenderingContext2D, chart: Chart, plot: ReturnType<
 
 function drawItems(
   ctx: CanvasRenderingContext2D, chart: Chart, plot: ReturnType<typeof cellRect>,
-  theme: ExportTheme, background: string | null,
+  theme: ExportTheme, background: string | null, opts: ExportOptions = DEFAULT_EXPORT,
 ): void {
+  const maxW = labelMaxWidth(plot.width, opts);
   for (const item of chart.items) {
     const px = dataToScreenX(item.x, chart.x, plot);
     const py = dataToScreenY(item.y, chart.y, plot);
@@ -288,71 +305,42 @@ function drawItems(
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    const width = ctx.measureText(item.text).width;
+    // Real measurement here, not the shared estimate: this path has a canvas to ask, and the label
+    // box must match the glyphs it wraps.
+    const lines = wrapText((t) => ctx.measureText(t).width, item.text, maxW);
+    const width = Math.max(...lines.map((l) => ctx.measureText(l).width));
+    const lineH = fontSize * LABEL_LINE_RATIO;
 
     if (item.background) {
       ctx.fillStyle = item.background;
-      roundRect(ctx, -width / 2 - 5, -fontSize - 3, width + 10, fontSize + 9, 3);
+      roundRect(ctx, -width / 2 - 5, -fontSize - 3, width + 10, labelBlockHeight(lines.length, fontSize), 3);
       ctx.fill();
     }
 
-    // The halo, matching the on-screen `paint-order: stroke`. Canvas has no paint-order, so this is
-    // the outline drawn first and the glyphs on top — the same visual result.
-    //
-    // On a transparent export the halo has to fall back to the theme background, because a light halo
-    // over a transparent plate would leave a white smear where the transparency is supposed to be.
     ctx.lineJoin = 'round';
     ctx.lineWidth = 3;
-    ctx.strokeStyle = item.background || background || theme.background;
-    ctx.strokeText(item.text, 0, 0);
     ctx.fillStyle = item.color ?? theme.text;
-    ctx.fillText(item.text, 0, 0);
+    lines.forEach((line, i) => {
+      const dy = i * lineH;
+      // Per line, because a wrapped label can put its lower lines in a different cell.
+      const dataY = i === 0
+        ? item.y
+        : screenToDataY(dataToScreenY(item.y, chart.y, plot) + dy, chart.y, plot);
+      // The halo, matching the on-screen `paint-order: stroke`. Canvas has no paint-order, so this
+      // is the outline drawn first and the glyphs on top — the same visual result.
+      ctx.strokeStyle = labelHalo(chart, item, background ?? theme.background, dataY);
+      ctx.strokeText(line, 0, dy);
+      ctx.fillText(line, 0, dy);
+    });
 
     if (item.box) {
       ctx.strokeStyle = item.color ?? theme.text;
       ctx.lineWidth = 1.5;
-      roundRect(ctx, -width / 2 - 7, -fontSize - 6, width + 14, fontSize + 12, 3);
+      roundRect(ctx, -width / 2 - 7, -fontSize - 6, width + 14, labelBlockHeight(lines.length, fontSize) + 3, 3);
       ctx.stroke();
     }
     ctx.restore();
   }
-}
-
-/**
- * Greedy word wrap.
- *
- * CJK has no spaces, so it must break between characters; Latin breaks at spaces. Both are handled
- * by the same loop: a break is taken at the last space if there was one, otherwise wherever the width
- * runs out. Splitting on words alone would put an entire Chinese sentence on one line, and splitting
- * on characters alone would break English mid-word.
- *
- * Typed to the one method it uses rather than to `CanvasRenderingContext2D`, so the SVG exporter can
- * pass a measurement stub instead of a real canvas. `wrapText` is the single wrapping rule for both
- * outputs, which is what keeps them from disagreeing about where a line ends.
- */
-export function wrapText(measure: TextMeasurer, text: string, maxWidth: number): string[] {
-  const out: string[] = [];
-  for (const paragraph of text.split('\n')) {
-    let line = '';
-    for (const ch of paragraph) {
-      const candidate = line + ch;
-      if (line && measure(candidate) > maxWidth) {
-        // Prefer a word boundary if one is available in the text already committed.
-        const space = line.lastIndexOf(' ');
-        if (space > 0) {
-          out.push(line.slice(0, space));
-          line = line.slice(space + 1) + ch;
-        } else {
-          out.push(line);
-          line = ch;
-        }
-      } else {
-        line = candidate;
-      }
-    }
-    out.push(line);
-  }
-  return out.length ? out : [''];
 }
 
 function roundRect(
@@ -423,7 +411,7 @@ export function buildChartSvg(
       if (!cell) continue;
       const r = cellRect(chart, col, row, plot);
       if (cell.color) {
-        put(`<rect x="${n(r.x)}" y="${n(r.y)}" width="${n(r.width)}" height="${n(r.height)}" fill="${esc(cell.color)}" fill-opacity="0.18"/>`);
+        put(`<rect x="${n(r.x)}" y="${n(r.y)}" width="${n(r.width)}" height="${n(r.height)}" fill="${esc(cell.color)}" fill-opacity="${CELL_FILL_ALPHA}"/>`);
       }
       if (!cell.label && !cell.note) continue;
 
@@ -480,6 +468,7 @@ export function buildChartSvg(
 
   // Free labels.
   const haloBase = opts.background ?? theme.background;
+  const maxW = labelMaxWidth(plot.width, opts);
   for (const item of chart.items) {
     const px = dataToScreenX(item.x, chart.x, plot);
     const py = dataToScreenY(item.y, chart.y, plot);
@@ -487,16 +476,26 @@ export function buildChartSvg(
       item.size ?? chart.baseFontSize ?? DEFAULTS.baseFontSize,
       LIMITS.minFontSize, LIMITS.maxFontSize, DEFAULTS.baseFontSize,
     );
-    const w = estimateTextWidth(item.text, fontSize);
+    const lines = labelLines(item.text, fontSize, maxW);
+    const w = Math.max(...lines.map((l) => estimateTextWidth(l, fontSize)));
+    const blockH = labelBlockHeight(lines.length, fontSize);
     if (item.background) {
-      put(`<rect x="${n(px - w / 2 - 5)}" y="${n(py - fontSize - 3)}" width="${n(w + 10)}" height="${n(fontSize + 9)}" rx="3" fill="${esc(item.background)}"/>`);
+      put(`<rect x="${n(px - w / 2 - 5)}" y="${n(py - fontSize - 3)}" width="${n(w + 10)}" height="${n(blockH)}" rx="3" fill="${esc(item.background)}"/>`);
     }
     if (item.box) {
-      put(`<rect x="${n(px - w / 2 - 7)}" y="${n(py - fontSize - 6)}" width="${n(w + 14)}" height="${n(fontSize + 12)}" rx="3" fill="none" stroke="${esc(item.color ?? theme.text)}" stroke-width="1.5"/>`);
+      put(`<rect x="${n(px - w / 2 - 7)}" y="${n(py - fontSize - 6)}" width="${n(w + 14)}" height="${n(blockH + 3)}" rx="3" fill="none" stroke="${esc(item.color ?? theme.text)}" stroke-width="1.5"/>`);
     }
-    // `paint-order: stroke` gives the halo under the glyphs in one element — the SVG equivalent of
-    // the canvas exporter's two-pass stroke-then-fill.
-    put(`<text x="${n(px)}" y="${n(py)}" fill="${esc(item.color ?? theme.text)}" stroke="${esc(item.background || haloBase)}" stroke-width="3" stroke-linejoin="round" paint-order="stroke" font-family="${esc(theme.fontText)}" font-size="${fontSize}" text-anchor="middle" dominant-baseline="central">${esc(item.text)}</text>`);
+    lines.forEach((line, i) => {
+      const dy = i * fontSize * LABEL_LINE_RATIO;
+      // Per line: a wrapped label can put its lower lines in a differently tinted cell.
+      const dataY = i === 0
+        ? item.y
+        : screenToDataY(py + dy, chart.y, plot);
+      const halo = labelHalo(chart, item, haloBase, dataY);
+      // `paint-order: stroke` gives the halo under the glyphs in one element — the SVG equivalent of
+      // the canvas exporter's two-pass stroke-then-fill.
+      put(`<text x="${n(px)}" y="${n(py + dy)}" fill="${esc(item.color ?? theme.text)}" stroke="${esc(halo)}" stroke-width="3" stroke-linejoin="round" paint-order="stroke" font-family="${esc(theme.fontText)}" font-size="${fontSize}" text-anchor="middle" dominant-baseline="central">${esc(line)}</text>`);
+    });
   }
 
   put('</svg>');

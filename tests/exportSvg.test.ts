@@ -18,6 +18,7 @@
  */
 import { buildChartSvg, renderChartToCanvas, wrapText, DEFAULT_EXPORT, supportsTransparency, ExportOptions } from '../src/exportImage';
 import { Chart, createChart } from '../src/model';
+import { compositeOver, CELL_FILL_ALPHA } from '../src/colorUi';
 
 const THEME = {
   background: '#ffffff', text: '#111111', muted: '#666666',
@@ -201,13 +202,23 @@ describe('transparent background', () => {
     expect(out).toContain('stroke="#bbbbbb"');
   });
 
-  it('the label halo falls back to the theme background when transparent', () => {
-    // A light halo over a transparent plate would leave a white smear exactly where the
-    // transparency is supposed to show through.
+  it('the label halo is blended against the theme background when transparent', () => {
+    // A hard-coded light halo over a transparent plate would leave a white smear exactly where the
+    // transparency is supposed to show through. The halo is now the cell tint blended over the theme
+    // background — opaque, and the colour this chart would have if it had been exported with one.
     const c = swot();
     c.items = [{ id: 'a', text: 'Halo', x: 0, y: 0 }];
     const clear = buildChartSvg(c, THEME, { ...DEFAULT_EXPORT, background: null });
-    expect(clear).toContain('stroke="#ffffff"');   // theme.background, not "none"
+    // (0, 0) on a −5..5 range lands in col 1, row 1 — Opportunities, tinted #1a73e8.
+    expect(clear).toContain(`stroke="${compositeOver('#1a73e8', CELL_FILL_ALPHA, THEME.background)}"`);
+    expect(clear).not.toContain('stroke="none"');
+  });
+
+  it('a label outside every tinted cell keeps the plain theme background as its halo', () => {
+    const c = createChart(2, 2);
+    c.items = [{ id: 'a', text: 'Halo', x: 0, y: 0 }];   // no cells declared at all
+    const clear = buildChartSvg(c, THEME, { ...DEFAULT_EXPORT, background: null });
+    expect(clear).toContain(`stroke="${THEME.background}"`);
   });
 
   it('a caller who omits background gets transparency, not a black rectangle', () => {

@@ -99,6 +99,8 @@ export const LIMITS = {
   minSpan: 1e-6,
   maxFontSize: 96,
   minFontSize: 8,
+  /** Floor for the label-width setting: below this a label wraps to roughly one glyph per line. */
+  minLabelWidthPercent: 20,
 } as const;
 
 /**

@@ -10,7 +10,7 @@ diff-friendly.
 - **Labelled axes** — name the X and Y axes, set their ranges, and the tick values are derived.
   Explicit ticks are supported when you want them.
 - **Free text anywhere** — labels are not tied to quadrants. Drop one at any coordinate, drag it to
-  reposition, double-click to edit, right-click to delete.
+  reposition, double-click to edit, right-click to delete. Long ones wrap at a width you choose.
 - **Cell labels, notes and colours** — name each cell, add longer text underneath, and tint it.
 - **Styled labels** — give a label its own background plate, an outline, and its own text size, so
   it stays readable wherever it lands.
@@ -33,7 +33,9 @@ into the editor.
 nine-box. You get the cells, colours, labels and an explanatory body to edit.
 
 **Add text** — double-click anywhere on the plot, or use the *Add label* button. With nothing
-pointed at, a new label lands in the middle of the cell you last clicked.
+pointed at, a new label lands in the middle of the cell you last clicked. A label wider than the
+configured share of the plot (80% by default, see *Maximum label width* in the settings) wraps onto
+another line.
 
 **Move text** — drag it.
 
@@ -71,6 +73,25 @@ always shows the current size. You can also drag a dashed split line on the canv
 The file is written beside the `.mdx` and never overwrites an existing one.
 
 Everything you do is written straight to the file, so you can also just edit the YAML.
+
+## Limits
+
+**A label is a label, not a paragraph.** Free text wraps, but only at the configured width — see
+*Maximum label width* in the settings, 80% of the plot area by default. A 91-character Chinese label
+at the default 14px needs 1180px, so it wraps onto two lines. Push past a few hundred characters and
+you get a tall stack of lines rather than a readable block.
+
+Two things follow:
+
+- Keep a label to a phrase or a short sentence. That is what the format is for.
+- When you need a paragraph, put it in the **cell's note**. Cell labels and notes wrap to the *cell*
+  width, which is the right measure for a block of text, on screen and in every export format.
+
+**One halo colour per line.** The outline that keeps a label readable where it crosses a grid line is
+coloured to match the cell that line sits in, so it is invisible against its own background. A label
+that overhangs a differently tinted cell still shows the ring on the overhanging part.
+
+**No multi-select.** One label at a time — no marquee, no group operations.
 
 ## Keyboard
 

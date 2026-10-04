@@ -20,12 +20,18 @@ export interface QuadrantChartSettings {
   defaultRows: number;
   /** Ask before overwriting when creating a chart with an existing filename. */
   confirmOverwrite: boolean;
+  /**
+   * How wide a free label may get, as a percentage of the plot area, before it wraps onto another
+   * line. Percent rather than pixels so the rule holds at any pane width or export size.
+   */
+  maxLabelWidthPercent: number;
 }
 
 const DEFAULT_SETTINGS: QuadrantChartSettings = {
   defaultColumns: DEFAULTS.grid.columns,
   defaultRows: DEFAULTS.grid.rows,
   confirmOverwrite: true,
+  maxLabelWidthPercent: 80,
 };
 
 export default class QuadrantChartPlugin extends Plugin {
@@ -257,6 +263,18 @@ export default class QuadrantChartPlugin extends Plugin {
   }
 
   /**
+   * Push the current label-width limit to every open chart and redraw them.
+   *
+   * A label wraps differently at every width, so the limit is not a one-off read at export time — the
+   * chart on screen has to follow it too, or the user sees one shape and exports another.
+   */
+  refreshLabelWidth(): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_QUADRANT)) {
+      if (leaf.view instanceof QuadrantChartView) leaf.view.applyLabelWidth();
+    }
+  }
+
+  /**
    * Shared text prompt.
    *
    * Wrapped rather than called directly because the canvas needs it too, and routing both through
@@ -359,6 +377,21 @@ class QuadrantChartSettingTab extends PluginSettingTab {
         .onChange(async (v) => {
           this.plugin.settings.confirmOverwrite = v;
           await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Maximum label width')
+      .setDesc('Labels wider than this share of the plot area wrap onto another line. Lower it if labels '
+        + 'overlap too much; the value is a percentage, so it holds at any window or export size.')
+      .addSlider((sl) => sl
+        .setLimits(20, 100, 5)
+        .setValue(this.plugin.settings.maxLabelWidthPercent)
+        .setDynamicTooltip()
+        .onChange(async (v) => {
+          this.plugin.settings.maxLabelWidthPercent = v;
+          await this.plugin.saveSettings();
+          // Every open chart draws its labels, so the new limit has to reach them to take effect.
+          this.plugin.refreshLabelWidth();
         }));
   }
 }

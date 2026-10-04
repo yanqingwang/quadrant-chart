@@ -11,11 +11,13 @@
  * bug where a label renders in a position the file no longer records.
  */
 
+import { CELL_FILL_ALPHA, labelHalo } from './colorUi';
 import { Axis, Chart, Item, LIMITS, DEFAULTS, clampNum, normalizeChart } from './model';
 import {
   Margins, PlotRect, DEFAULT_MARGINS,
   axisTicks, cellCentre, cellRect, dataToScreenX, dataToScreenY, estimateTextWidth, findCell, formatTick,
   screenToDataX, screenToDataY, splitPositions,
+  LABEL_LINE_RATIO, labelBlockHeight, labelLines,
 } from './geometry';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -61,6 +63,15 @@ export class ChartCanvas {
    * and clears the cell, because a click that lands on text means the text.
    */
   private selectedItem: string | null = null;
+  /** Resolved plot background, refreshed on each render; the label halo is blended against it. */
+  private haloBase = '#ffffff';
+  /**
+   * How wide a label may get, as a share of the plot area, before it wraps.
+   *
+   * A percentage rather than a pixel count so the same setting holds in a narrow pane and in a
+   * 1400px export. Set from the plugin's settings; changing it redraws.
+   */
+  private labelWidthPercent = 80;
   /**
    * Snapshots of the chart as it was BEFORE each committed change.
    *
@@ -304,6 +315,9 @@ export class ChartCanvas {
     const svg = this.svg;
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     const rect = this.plot;
+    // Read once per redraw, not once per label: the label halo is blended against the plot
+    // background, and a getComputedStyle per label would run on every drag frame.
+    this.haloBase = readCssColor(this.container, '--background-primary', '#ffffff');
 
     this.drawCells(chart, rect);
     this.drawGrid(chart, rect);
@@ -338,7 +352,7 @@ export class ChartCanvas {
           // that happened to have no colour were selectable, which is why it looked arbitrary.
           svg(this.svg, 'rect', {
             x: r.x, y: r.y, width: r.width, height: r.height,
-            class: 'qc-cell-fill', fill: cell.color, 'fill-opacity': '0.18',
+            class: 'qc-cell-fill', fill: cell.color, 'fill-opacity': String(CELL_FILL_ALPHA),
           });
         }
         if (!cell.label && !cell.note) continue;
@@ -448,6 +462,9 @@ export class ChartCanvas {
       transform: `translate(${px} ${py})`,
     });
     g.dataset['itemId'] = item.id;
+    // The halo colour cannot live in the stylesheet: it depends on which cell this label happens to
+    // sit in, and a ring in the wrong colour is worse than no ring. See `labelHalo`.
+    g.style.setProperty('--qc-halo', labelHalo(chart, item, this.haloBase));
 
     // A hit plate as wide as the text, so a click anywhere on the label selects the label.
     //
@@ -457,26 +474,28 @@ export class ChartCanvas {
     // selected when the user meant the label. Width is estimated rather than measured because
     // getComputedTextLength needs layout this widget does not wait for; the estimate only has to be
     // generous enough to cover the glyphs.
-    const width = estimateTextWidth(item.text, fontSize);
+    const lines = labelLines(item.text, fontSize, this.labelMaxWidth());
+    const width = Math.max(...lines.map((l) => estimateTextWidth(l, fontSize)));
 
     // The label's own background plate, when it has one. Drawn first so it sits behind the text,
     // the hit plate and the selection box.
+    const blockH = labelBlockHeight(lines.length, fontSize);
     if (item.background) {
       svg(g, 'rect', {
-        x: -width / 2 - 5, y: -fontSize - 3, width: width + 10, height: fontSize + 9,
+        x: -width / 2 - 5, y: -fontSize - 3, width: width + 10, height: blockH,
         class: 'qc-item-bg', rx: 3, fill: item.background,
       });
     }
 
     svg(g, 'rect', {
-      x: -width / 2, y: -fontSize - 3, width, height: fontSize + 9, class: 'qc-item-hit',
+      x: -width / 2, y: -fontSize - 3, width, height: blockH, class: 'qc-item-hit',
     });
 
     // A box the author asked for, drawn under the selection box so the transient selection
     // indicator always reads on top of the permanent one.
     if (item.box) {
       svg(g, 'rect', {
-        x: -width / 2 - 7, y: -fontSize - 6, width: width + 14, height: fontSize + 12,
+        x: -width / 2 - 7, y: -fontSize - 6, width: width + 14, height: blockH + 3,
         class: 'qc-item-box', rx: 3,
       });
     }
@@ -484,16 +503,48 @@ export class ChartCanvas {
     // The selection box is drawn BEFORE the text so it frames it rather than covering it.
     if (selected) {
       svg(g, 'rect', {
-        x: -width / 2 - 5, y: -fontSize - 8, width: width + 10, height: fontSize + 14,
+        x: -width / 2 - 5, y: -fontSize - 8, width: width + 10, height: blockH + 5,
         class: 'qc-item-selected', rx: 3,
       });
     }
 
-    const text = svg(g, 'text', {
-      x: 0, y: 0, class: 'qc-item-text', 'text-anchor': 'middle',
-      'font-size': fontSize, fill: item.color ?? 'currentColor',
+    // One <text> per line rather than one with embedded newlines: the halo is set per line, because a
+    // wrapped label that spans two rows needs the colour of the row each line actually sits in.
+    lines.forEach((line, i) => {
+      const y = i * fontSize * LABEL_LINE_RATIO;
+      const el = svg(g, 'text', {
+        x: 0, y, class: 'qc-item-text', 'text-anchor': 'middle',
+        'font-size': fontSize, fill: item.color ?? 'currentColor',
+      });
+      if (i > 0) el.style.setProperty('--qc-halo', this.lineHalo(chart, item, y));
+      el.textContent = line;
     });
-    text.textContent = item.text;
+  }
+
+  /** Widest a label may be, in pixels, given the current plot and the configured share of it. */
+  private labelMaxWidth(): number {
+    return Math.max(1, (this.plot.width * this.labelWidthPercent) / 100);
+  }
+
+  /**
+   * Halo colour for one line of a wrapped label.
+   *
+   * The line sits `dy` pixels below the label's anchor, which in a steeply scaled chart can be a
+   * whole row away — so the cell is resolved from that line's own position, not the label's.
+   */
+  private lineHalo(chart: Chart, item: Item, dy: number): string {
+    const dataY = dy === 0
+      ? item.y
+      : screenToDataY(dataToScreenY(item.y, chart.y, this.plot) + dy, chart.y, this.plot);
+    return labelHalo(chart, item, this.haloBase, dataY);
+  }
+
+  /** Apply a new label-width limit and redraw, since wrapping changes every label's geometry. */
+  setLabelWidthPercent(percent: number): void {
+    const next = clampNum(percent, LIMITS.minLabelWidthPercent, 100, 80);
+    if (next === this.labelWidthPercent) return;
+    this.labelWidthPercent = next;
+    this.render();
   }
 
   // ── interaction ───────────────────────────────────────────────────────────
@@ -858,12 +909,15 @@ private svgPoint(evt: { clientX: number; clientY: number }): { x: number; y: num
       item.size ?? chart.baseFontSize ?? DEFAULTS.baseFontSize,
       LIMITS.minFontSize, LIMITS.maxFontSize, DEFAULTS.baseFontSize,
     );
-    const width = estimateTextWidth(item.text, fontSize);
+    // Must wrap exactly as `drawItem` does, or a label could be drawn over three lines and still
+    // only be clickable on the first — the click would fall through to the cell underneath.
+    const lines = labelLines(item.text, fontSize, this.labelMaxWidth());
+    const width = Math.max(...lines.map((l) => estimateTextWidth(l, fontSize)));
     return {
       x: dataToScreenX(item.x, chart.x, this.plot) - width / 2,
       y: dataToScreenY(item.y, chart.y, this.plot) - fontSize - 3,
       width,
-      height: fontSize + 9,
+      height: labelBlockHeight(lines.length, fontSize),
     };
   }
 
@@ -967,6 +1021,11 @@ function svg<K extends keyof SVGElementTagNameMap>(
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
   parent.appendChild(el);
   return el;
+}
+
+function readCssColor(el: Element, prop: string, fallback: string): string {
+  if (typeof getComputedStyle !== 'function') return fallback;
+  return getComputedStyle(el).getPropertyValue(prop).trim() || fallback;
 }
 
 function inRect(p: { x: number; y: number }, r: PlotRect): boolean {

@@ -196,3 +196,62 @@ function trimNum(v: number): string {
   const r = Math.round(v * 100) / 100;
   return String(r);
 }
+
+/** Measures rendered text width in pixels. */
+export type TextMeasurer = (text: string) => number;
+
+/**
+ * Greedy word wrap.
+ *
+ * CJK has no spaces, so it must break between characters; Latin breaks at spaces. Both are handled
+ * by the same loop: a break is taken at the last space if there was one, otherwise wherever the width
+ * runs out. Splitting on words alone would put an entire Chinese sentence on one line, and splitting
+ * on characters alone would break English mid-word.
+ *
+ * Typed to the one method it uses rather than to `CanvasRenderingContext2D`, so the SVG exporter can
+ * pass a measurement stub instead of a real canvas. `wrapText` is the single wrapping rule for both
+ * outputs, which is what keeps them from disagreeing about where a line ends.
+ */
+export function wrapText(measure: TextMeasurer, text: string, maxWidth: number): string[] {
+  const out: string[] = [];
+  for (const paragraph of text.split('\n')) {
+    let line = '';
+    for (const ch of paragraph) {
+      const candidate = line + ch;
+      if (line && measure(candidate) > maxWidth) {
+        // Prefer a word boundary if one is available in the text already committed.
+        const space = line.lastIndexOf(' ');
+        if (space > 0) {
+          out.push(line.slice(0, space));
+          line = line.slice(space + 1) + ch;
+        } else {
+          out.push(line);
+          line = ch;
+        }
+      } else {
+        line = candidate;
+      }
+    }
+    out.push(line);
+  }
+  return out.length ? out : [''];
+}
+
+/** Distance between wrapped label lines, as a multiple of the font size. */
+export const LABEL_LINE_RATIO = 1.2;
+
+/**
+ * The lines a free label occupies, wrapped to `maxWidth`.
+ *
+ * Shared by the on-screen canvas and both exporters so a label cannot be one shape on screen and
+ * another in the file the user exports.
+ */
+export function labelLines(text: string, fontSize: number, maxWidth: number): string[] {
+  if (!(maxWidth > 0)) return [text];
+  return wrapText((t) => estimateTextWidth(t, fontSize), text, maxWidth);
+}
+
+/** Height of a wrapped label block, in the same units as `itemHitRect`. */
+export function labelBlockHeight(lineCount: number, fontSize: number): number {
+  return fontSize + 9 + Math.max(0, lineCount - 1) * fontSize * LABEL_LINE_RATIO;
+}

@@ -198,9 +198,22 @@ export class QuadrantChartView extends FileView {
       // no way to delete — the step that had to happen first was invisible.
       onSelectLabel: () => this.renderToolbar(),
     });
+    // Applied after construction: the canvas needs a measured plot before it can turn a percentage of
+    // that plot into a pixel width, and the first draw happens on load.
+    this.applyLabelWidth();
   }
 
   private toolbarEl: HTMLElement | null = null;
+
+  /**
+   * Push the plugin's label-width limit into the canvas.
+   *
+   * Called when a chart is drawn and whenever the setting changes: wrapping alters every label's
+   * geometry, so the canvas has to re-lay-out rather than keep what it drew under the old limit.
+   */
+  applyLabelWidth(): void {
+    this.canvas?.setLabelWidthPercent(this.plugin.settings.maxLabelWidthPercent);
+  }
 
   /**
    * Rebuild the toolbar's state-dependent parts.

@@ -12,6 +12,8 @@
  */
 
 import { App, ColorComponent, Modal, Setting } from 'obsidian';
+import { Chart, Item } from './model';
+import { cellAt, findCell } from './geometry';
 
 /**
  * Curated tints. Each must remain distinguishable from its neighbours at the 18% opacity used for
@@ -38,6 +40,62 @@ export function normalizeHex(value: string | null | undefined): string | null {
   // Expand #abc to #aabbcc, which the colour component emits and hand-editing often produces.
   if (/^#[0-9a-f]{3}$/.test(v)) v = `#${v[1]}${v[1]}${v[2]}${v[2]}${v[3]}${v[3]}`;
   return /^#[0-9a-f]{6}$/.test(v) ? v : null;
+}
+
+/**
+ * Opacity a cell tint is painted at, over the page background.
+ *
+ * Defined once because the label halo is computed by blending against this exact value: if the two
+ * ever drift, every label in a tinted cell grows a visible ring, which reads as a drop shadow.
+ */
+export const CELL_FILL_ALPHA = 0.18;
+
+/**
+ * Blend `fg` over `bg` at `alpha` and return `#rrggbb`.
+ *
+ * A cell tint is translucent, so the colour actually visible behind a label sitting in that cell is
+ * the blend — neither the tint nor the page background. Falls back to `bg` when `fg` is absent or
+ * unparseable, so a hand-edited colour degrades to the previous behaviour instead of to black.
+ */
+export function compositeOver(fg: string | null | undefined, alpha: number, bg: string): string {
+  const b = normalizeHex(bg);
+  const f = normalizeHex(fg);
+  if (!b || !f) return b ?? bg;
+  const byte = (i: number): string => {
+    const bf = parseInt(b.slice(1 + i * 2, 3 + i * 2), 16);
+    const ff = parseInt(f.slice(1 + i * 2, 3 + i * 2), 16);
+    const v = Math.round(bf + (ff - bf) * alpha);
+    return Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0');
+  };
+  return `#${byte(0)}${byte(1)}${byte(2)}`;
+}
+
+/**
+ * The colour actually visible immediately behind a free label, which is what its halo must be.
+ *
+ * The halo exists to keep a label legible where it crosses a grid line or another label. That only
+ * works if the halo IS the surface behind the glyphs — a halo in any other colour is a visible ring
+ * around every label, and a white ring on a tinted cell reads as a drop shadow rather than as
+ * separation. It cannot simply be dropped either, because crossing a grid line still needs it.
+ *
+ * Precedence, in the order the surfaces stack:
+ *   1. the label's own background plate, which is opaque and covers the cell entirely;
+ *   2. the cell tint blended over the plot background, since the tint is painted translucently;
+ *   3. the plot background itself, for a label on an uncoloured cell or outside the grid.
+ *
+ * `atY` exists for wrapped labels: each line is resolved from its own row, because in a steeply
+ * scaled chart the line below the anchor can sit in a different cell from the anchor.
+ *
+ * `base` is the plot background as an opaque colour. On a transparent export there is no painted
+ * background, so the caller passes the theme background: the halo then matches what the same chart
+ * would look like with one, rather than leaving a light smear over pixels meant to stay see-through.
+ */
+export function labelHalo(chart: Chart, item: Item, base: string, atY = item.y): string {
+  if (item.background) return item.background;
+  const at = cellAt(chart, item.x, atY);
+  const cell = at ? findCell(chart, at.col, at.row) : undefined;
+  if (cell?.color) return compositeOver(cell.color, CELL_FILL_ALPHA, base);
+  return base;
 }
 
 /** Same colour, ignoring case — the file may hold either form after a hand edit. */
