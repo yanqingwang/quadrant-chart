@@ -6,7 +6,7 @@ diff-friendly.
 
 ## What it does
 
-- **Any N × M grid**, not just four quadrants. Set columns and rows independently, from 1×1 to 8×8.
+- **Any N × M grid**, not just four quadrants. Set columns and rows independently, from 1×1 to 12×12.
 - **Labelled axes** — name the X and Y axes, set their ranges, and the tick values are derived.
   Explicit ticks are supported when you want them.
 - **Free text anywhere** — labels are not tied to quadrants. Drop one at any coordinate, drag it to
