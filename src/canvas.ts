@@ -182,7 +182,9 @@ export class ChartCanvas {
    */
   private restoreFrom(snapshot: string): Chart | null {
     try {
-      return normalizeChart(JSON.parse(snapshot) as unknown as Record<string, unknown>);
+      // `normalizeChart` accepts `unknown`, so the double cast only papered over `JSON.parse`
+      // returning `any` — which it does, and which is exactly why the value must not be trusted.
+      return normalizeChart(JSON.parse(snapshot) as Record<string, unknown>);
     } catch {
       return null;
     }
@@ -630,16 +632,31 @@ private svgPoint(evt: { clientX: number; clientY: number }): { x: number; y: num
     });
   }
 
+  /**
+   * Double-click edits the label under the pointer; on empty plot area it creates one.
+   *
+   * The label is resolved by POSITION, never by `event.target`. The first click of a double-click
+   * selects the label, and selecting re-renders — and `render()` is a full teardown, so the `<text>`
+   * node the pointer was over is destroyed and rebuilt. A browser then resolves the dblclick's target
+   * to the nearest common ancestor of its two mousedown targets, and with the first one detached that
+   * is the `<svg>` itself. Asking the event which label was hit therefore answered "none", the
+   * handler fell through to the empty-area branch, and double-clicking a label silently created a
+   * second one beside it.
+   *
+   * Hit-testing the coordinates is immune to that, and it is the same test a single click uses, so
+   * the two can never disagree about what is under the pointer.
+   */
   private onDoubleClick = (evt: MouseEvent): void => {
-    const target = evt.target as Element;
-    const id = target.closest?.('.qc-item')?.getAttribute('data-item-id');
-    if (id) {
-      const item = this.chart.items.find((i) => i.id === id);
-      if (item) void this.renameItem(item);
+    const p = this.svgPoint(evt);
+    const stack = this.labelsAt(p.x, p.y);
+    if (stack.length) {
+      // When labels overlap, prefer one the user has already cycled to with single clicks — they
+      // chose it deliberately, and silently jumping back to the top one would undo that choice.
+      const chosen = stack.find((i) => i.id === this.selectedItem) ?? stack[0];
+      void this.renameItem(chosen);
       return;
     }
     // Double-clicking empty plot area creates a label at that spot: the fastest way to place text.
-    const p = this.svgPoint(evt as unknown as PointerEvent);
     if (!inRect(p, this.plot)) return;
     const x = screenToDataX(p.x, this.chart.x, this.plot);
     const y = screenToDataY(p.y, this.chart.y, this.plot);
@@ -709,13 +726,17 @@ private svgPoint(evt: { clientX: number; clientY: number }): { x: number; y: num
    * no longer present, so the two paths cannot delete twice.
    */
   private onContextMenu = (evt: MouseEvent): void => {
-    const target = evt.target as Element;
-    const id = target.closest?.('.qc-item')?.getAttribute('data-item-id');
-    if (!id) return;
+    // Hit-tested by position for the same reason as the double-click: `pointerup` has already run
+    // by the time this fires and re-rendered, so the node the event names is gone. Reading
+    // `event.target` here answered "no label" and the fallback silently did nothing.
+    const p = this.svgPoint(evt);
+    const stack = this.labelsAt(p.x, p.y);
+    if (!stack.length) return;
     evt.preventDefault();
+    const chosen = stack.find((i) => i.id === this.selectedItem) ?? stack[0];
     // removeItem already snapshots, redraws, saves and notifies the toolbar. Repeating any of that
     // here meant one right-click cost two writes and TWO undo steps to walk back.
-    this.removeItem(id);
+    this.removeItem(chosen.id);
   };
 
   // ── mutations exposed to the host (toolbar, commands) ─────────────────────
@@ -930,17 +951,18 @@ private svgPoint(evt: { clientX: number; clientY: number }): { x: number; y: num
  * `createEl` is typed to `keyof HTMLElementTagNameMap` and creates an element in the HTML namespace,
  * so an SVG built with it would not render — the tag would be in the wrong namespace entirely.
  * Obsidian's `createSvg` is no help either: it makes a standalone `<svg>` with no parent argument,
- * and this needs children of an existing `<svg>` or `<g>`.
+ * and this needs children of an existing `<svg>` or `<g>`. `SVGElement` is augmented with only
+ * `setCssStyles` and `setCssProps`, never `createEl`.
  *
- * The `prefer-create-el` lint rule is therefore a false positive on these three lines.
+ * `prefer-create-el` therefore flags this line, and that is a false positive. Obsidian's own linter
+ * rejects disabling the rule, so the warning is left standing rather than suppressed: rewriting this
+ * to satisfy the rule would put every node in the HTML namespace and stop the chart rendering.
  */
-/* eslint-disable-next-line obsidianmd/prefer-create-el */
 function svg<K extends keyof SVGElementTagNameMap>(
   parent: SVGElement,
   tag: K,
   attrs: Record<string, string | number> = {},
 ): SVGElementTagNameMap[K] {
-  /* eslint-disable-next-line obsidianmd/prefer-create-el */
   const el = document.createElementNS(SVG_NS, tag);
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
   parent.appendChild(el);

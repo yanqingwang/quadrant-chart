@@ -222,7 +222,15 @@ describe('deleting fires exactly once', () => {
     canvas.measure();
     canvas.render();
     const hit = (canvas['svg'] as SVGSVGElement).querySelector('g[data-item-id="a"] .qc-item-hit')!;
-    hit.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+    // The handler hit-tests by position, as a real browser event always carries one. A MouseEvent
+    // built without clientX/clientY reports (0,0), which is outside the plot — so the coordinates
+    // are taken from where the label was actually drawn.
+    const drawn = /translate\(([-\d.]+) ([-\d.]+)\)/.exec(
+      (canvas['svg'] as SVGSVGElement).querySelector('g[data-item-id="a"]')!.getAttribute('transform')!,
+    )!;
+    hit.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true, clientX: Number(drawn[1]), clientY: Number(drawn[2]),
+    }));
 
     expect(canvas.getChart().items).toHaveLength(0);
     // Twice before: removeItem committed, then the handler committed the same state again.

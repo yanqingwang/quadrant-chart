@@ -214,9 +214,15 @@ describe('the selection box is drawn on the selected label only', () => {
   it('does not survive the label being deleted', () => {
     const { canvas, svg } = build(withItems('Doomed'));
     clickLabel(svg, 'lbl0');
+    // Coordinates come from where the label was drawn, because the handler hit-tests by position
+    // rather than by event target — a target that has been re-rendered away names nothing.
+    const drawn = /translate\(([-\d.]+) ([-\d.]+)\)/.exec(
+      svg.querySelector('g[data-item-id="lbl0"]')!.getAttribute('transform')!,
+    )!;
     canvas['onContextMenu']?.({
       preventDefault: () => undefined,
-      target: svg.querySelector('g[data-item-id="lbl0"] .qc-item-hit'),
+      clientX: Number(drawn[1]),
+      clientY: Number(drawn[2]),
     } as unknown as MouseEvent);
     expect(canvas.getSelectedItem()).toBeNull();
     expect(svg.querySelectorAll('.qc-item-selected')).toHaveLength(0);

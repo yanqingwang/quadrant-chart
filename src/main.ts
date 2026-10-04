@@ -96,7 +96,10 @@ export default class QuadrantChartPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    // `loadData` is typed `any`, and letting that flow into the assignment would make every later read
+    // of `this.settings` unchecked. Narrow it here so the rest of the plugin stays typed.
+    const stored = (await this.loadData()) as Partial<QuadrantChartSettings> | null;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
     // Clamp on load: a hand-edited data.json must not be able to produce a 0-column chart.
     this.settings.defaultColumns = clampInt(this.settings.defaultColumns, LIMITS.minSplits, LIMITS.maxSplits, 2);
     this.settings.defaultRows = clampInt(this.settings.defaultRows, LIMITS.minSplits, LIMITS.maxSplits, 2);

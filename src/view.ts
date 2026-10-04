@@ -229,7 +229,7 @@ export class QuadrantChartView extends FileView {
         ? 'Edit, colour, outline or delete this label'
         : 'Click a label on the chart first — this button acts on the label you select',
       (e) => this.pickLabel(e));
-    this.button(bar, 'Axes', 'axis', 'Rename the axes and set their ranges', (e) => this.pickAxes(e));
+    this.button(bar, 'Axes', 'axis', 'Rename the axes and set their ranges', (e) => void this.pickAxes(e));
     this.button(bar, 'Title', 'type', 'Set the chart title', () => void this.promptTitle());
     this.button(bar, 'Export', 'image-file', 'Save the chart as an image file', (e) => void this.plugin.pickExport(e));
   }
