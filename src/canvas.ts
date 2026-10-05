@@ -18,6 +18,7 @@ import {
   axisTicks, cellCentre, cellRect, dataToScreenX, dataToScreenY, estimateTextWidth, findCell, formatTick,
   screenToDataX, screenToDataY, splitPositions,
   LABEL_LINE_RATIO, labelBlockHeight, labelLines,
+  AXIS_CAPTION_DX, AXIS_CAPTION_DY, AXIS_NOTE_DX, AXIS_NOTE_DY, AXIS_NOTE_SIZE, marginsFor,
 } from './geometry';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -49,6 +50,7 @@ export interface CanvasCallbacks {
 export class ChartCanvas {
   private svg: SVGSVGElement;
   private plot: PlotRect = { x: 0, y: 0, width: 1, height: 1 };
+  /** Recomputed by `measure()` from the chart; this is only the value before the first measure. */
   private margins: Margins = { ...DEFAULT_MARGINS };
   private drag: DragMode = { kind: 'none' };
   /** Live position while dragging, so the model is not rewritten on every pointermove. */
@@ -236,6 +238,9 @@ export class ChartCanvas {
   measure(): void {
     const w = Math.max(240, this.container.clientWidth);
     const h = Math.max(200, this.container.clientHeight);
+    // Recomputed from the chart, not held fixed: an axis note reserves room, and that room has to be
+    // the same room the exporters reserve.
+    this.margins = marginsFor(this.getChart());
     this.svg.setAttribute('width', String(w));
     this.svg.setAttribute('height', String(h));
     this.svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
@@ -312,6 +317,12 @@ export class ChartCanvas {
 
   render(): void {
     const chart = this.getChart();
+    // An axis note changes the margins, and the plot rect is derived from them — so setting or clearing
+    // one has to re-measure or the note is drawn outside the plot it was given room for. Compared
+    // rather than measured unconditionally: this runs on every drag frame, and a layout read per frame
+    // is a cost the canvas should not pay to support a change that happens once per menu click.
+    const wanted = marginsFor(chart);
+    if (wanted.bottom !== this.margins.bottom || wanted.left !== this.margins.left) this.measure();
     const svg = this.svg;
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     const rect = this.plot;
@@ -432,17 +443,37 @@ export class ChartCanvas {
     // to the toolbar. `data-axis` is what the click handler reads to know which one was hit.
     if (x.label) {
       const t = svg(this.svg, 'text', {
-        x: rect.x + rect.width / 2, y: rect.y + rect.height + 42,
+        x: rect.x + rect.width / 2, y: rect.y + rect.height + AXIS_CAPTION_DY,
         class: 'qc-axis-label qc-editable', 'text-anchor': 'middle', 'data-axis': 'x',
       });
       t.textContent = x.label;
     }
     if (y.label) {
       const t = svg(this.svg, 'text', {
-        x: 16, y: rect.y + rect.height / 2, class: 'qc-axis-label qc-editable', 'text-anchor': 'middle',
-        transform: `rotate(-90 16 ${rect.y + rect.height / 2})`, 'data-axis': 'y',
+        x: AXIS_CAPTION_DX, y: rect.y + rect.height / 2, class: 'qc-axis-label qc-editable',
+        'text-anchor': 'middle',
+        transform: `rotate(-90 ${AXIS_CAPTION_DX} ${rect.y + rect.height / 2})`, 'data-axis': 'y',
       });
       t.textContent = y.label;
+    }
+    // Axis notes. The margin for these is reserved by `marginsFor`, so they never land on top of the
+    // tick labels or off the bottom of the canvas. Not `qc-editable`: a note is set from the Axes
+    // menu, and making it look clickable when a click does nothing would be a lie.
+    if (x.note) {
+      const t = svg(this.svg, 'text', {
+        x: rect.x + rect.width / 2, y: rect.y + rect.height + AXIS_NOTE_DY,
+        class: 'qc-axis-note', 'text-anchor': 'middle', 'font-size': AXIS_NOTE_SIZE,
+        'data-axis-note': 'x',
+      });
+      t.textContent = x.note;
+    }
+    if (y.note) {
+      const t = svg(this.svg, 'text', {
+        x: AXIS_NOTE_DX, y: rect.y + rect.height / 2, class: 'qc-axis-note',
+        'text-anchor': 'middle', 'font-size': AXIS_NOTE_SIZE,
+        transform: `rotate(-90 ${AXIS_NOTE_DX} ${rect.y + rect.height / 2})`, 'data-axis-note': 'y',
+      });
+      t.textContent = y.note;
     }
     if (chart.title) {
       const t = svg(this.svg, 'text', {

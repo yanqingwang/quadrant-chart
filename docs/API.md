@@ -21,10 +21,12 @@ x:
   label: Impact
   min: 0
   max: 10
+  note: 1-10 from the line manager, recalibrated each quarter   # optional
 y:
   label: Urgency
   min: 0
   max: 10
+  note: reversed - lower is more urgent                          # optional
 grid:
   columns: 2
   rows: 2
@@ -107,6 +109,13 @@ chart.add_cell(0, 0, "Weaknesses",    color="red",    note="Internal · harmful"
 chart.add_cell(1, 1, "Opportunities", color="blue",   note="External · helpful")
 chart.add_cell(1, 0, "Threats",       color="orange", note="External · harmful")
 
+# An axis note is a line drawn beside the axis, saying what the scale means. Writing one makes the
+# plugin reserve room for it; clearing it gives the room back.
+chart.set_axis("x", label="Impact", minimum=0, maximum=10, note="1-10 from the line manager")
+chart.set_axis("y", note="reversed - lower is more urgent")
+chart.set_axis("x", clear_note=True)          # remove it and the space it reserved
+# Everything else on the axis is settable the same way: minimum, maximum, ticks.
+
 # Labels anywhere on the plot.
 chart.add_item("Content-hash sync", x=-3.4, y=4.2, item_id="s1")
 chart.add_item("Silent save bug",  x=-4.2, y=-3.2, item_id="w1")
@@ -182,6 +191,13 @@ python3 Script/mdx_chart.py create --path Q1.mdx --title "Q1 Priorities" \
     --x-label "Impact" --x-min 0 --x-max 10 \
     --y-label "Urgency" --y-min 0 --y-max 10 \
     --columns 2 --rows 2 --body "# Notes"
+
+# Set an axis caption, range or note. Omit --note to leave the note alone.
+python3 Script/mdx_chart.py set-axis --path Q1.mdx --axis x \
+    --label "Impact" --min 0 --max 10 --note "1-10 from the line manager"
+
+# Remove an axis note, and the space it was reserving
+python3 Script/mdx_chart.py set-axis --path Q1.mdx --axis y --clear-note
 
 # Add a label
 python3 Script/mdx_chart.py add-item --path Q1.mdx --text "Rework sync engine" --x 8.2 --y 9

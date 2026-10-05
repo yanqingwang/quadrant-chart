@@ -65,6 +65,38 @@ export interface Margins {
 
 export const DEFAULT_MARGINS: Margins = { left: 64, right: 24, top: 32, bottom: 56 };
 
+/**
+ * Layout constants for the axis captions and their notes.
+ *
+ * These live here rather than inline because three renderers draw them — the on-screen canvas, the
+ * canvas exporter and the SVG exporter — and a plot rect or an offset that differs between them is a
+ * chart that looks one way on screen and another in the exported file.
+ */
+export const AXIS_CAPTION_DY = 42;   // x caption baseline, below the plot's bottom edge
+export const AXIS_NOTE_DY = 62;      // x note baseline, below the plot's bottom edge
+export const AXIS_CAPTION_DX = 20;   // y caption, rotated, from the left edge of the canvas
+export const AXIS_NOTE_DX = 44;      // y note, rotated — beside the caption, clear of the tick labels
+export const AXIS_NOTE_SIZE = 11;    // matches tick labels and cell notes
+
+/** Bottom margin for a chart whose x axis carries a note, giving the note a line of its own. */
+export const AXIS_NOTE_BOTTOM = 84;
+/** Left margin for a chart whose y axis carries a note, giving it a column beside the caption. */
+export const AXIS_NOTE_LEFT = 88;
+
+/**
+ * Margins for a chart.
+ *
+ * Grown only when a chart actually carries an axis note, so every chart without one keeps the exact
+ * layout it has always had. The exporters use this too rather than their own constant: if the canvas
+ * reserved room for a note and the export did not, the note would be clipped off the exported file.
+ */
+export function marginsFor(chart: Chart): Margins {
+  const m: Margins = { ...DEFAULT_MARGINS };
+  if (chart.x.note) m.bottom = AXIS_NOTE_BOTTOM;
+  if (chart.y.note) m.left = AXIS_NOTE_LEFT;
+  return m;
+}
+
 /** Uniform scale factor for the given plot rect, clamped so a collapsed pane cannot divide by ~0. */
 export function dataToScreenX(value: number, axis: Axis, rect: PlotRect): number {
   const t = (value - axis.min) / (axis.max - axis.min || 1);

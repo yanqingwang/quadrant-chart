@@ -30,6 +30,7 @@ import {
   TextMeasurer, axisTicks, cellRect, dataToScreenX, dataToScreenY, estimateTextWidth, findCell,
   formatTick, labelBlockHeight, labelLines, splitPositions, wrapText,
   LABEL_LINE_RATIO, screenToDataY,
+  AXIS_CAPTION_DX, AXIS_CAPTION_DY, AXIS_NOTE_DX, AXIS_NOTE_DY, AXIS_NOTE_SIZE, marginsFor,
 } from './geometry';
 
 export { wrapText } from './geometry';
@@ -126,7 +127,7 @@ export function renderChartToCanvas(
   opts: ExportOptions = DEFAULT_EXPORT,
 ): void {
   const { width, height, scale } = opts;
-  const margins: Margins = { ...DEFAULT_MARGINS, top: 48 };
+  const margins: Margins = { ...marginsFor(chart), top: 48 };
   const plot = {
     x: margins.left,
     y: margins.top,
@@ -260,21 +261,47 @@ function drawAxes(ctx: CanvasRenderingContext2D, chart: Chart, plot: ReturnType<
   ctx.fillStyle = theme.text;
   ctx.font = `500 13px ${theme.fontUi}`;
 
+  // The axis baselines are shared with the SVG exporter and the on-screen canvas, which both position
+  // by baseline. Canvas positions by `top`, which sits about this far above the visual baseline — so
+  // every offset here is the shared constant minus this, rather than a second hand-tuned number.
+  const TOP_TO_BASELINE = 12;
+
   if (chart.x.label) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    ctx.fillText(chart.x.label, plot.x + plot.width / 2, plot.y + plot.height + 30);
+    ctx.fillText(chart.x.label, plot.x + plot.width / 2,
+      plot.y + plot.height + AXIS_CAPTION_DY - TOP_TO_BASELINE);
   }
 
   if (chart.y.label) {
     // Rotated up the left gutter, matching the on-screen axis. ctx.translate + rotate rather than
     // a transform string, because the string form is fiddly to get right about the origin.
     ctx.save();
-    ctx.translate(20, plot.y + plot.height / 2);
+    ctx.translate(AXIS_CAPTION_DX, plot.y + plot.height / 2);
     ctx.rotate(-Math.PI / 2);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     ctx.fillText(chart.y.label, 0, 0);
+    ctx.restore();
+  }
+
+  if (chart.x.note || chart.y.note) {
+    ctx.fillStyle = theme.muted;
+    ctx.font = `${AXIS_NOTE_SIZE}px ${theme.fontUi}`;
+  }
+  if (chart.x.note) {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(chart.x.note, plot.x + plot.width / 2,
+      plot.y + plot.height + AXIS_NOTE_DY - TOP_TO_BASELINE);
+  }
+  if (chart.y.note) {
+    ctx.save();
+    ctx.translate(AXIS_NOTE_DX, plot.y + plot.height / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(chart.y.note, 0, 0);
     ctx.restore();
   }
 
@@ -385,7 +412,7 @@ export function buildChartSvg(
   opts: ExportOptions = DEFAULT_EXPORT,
 ): string {
   const { width, height } = opts;
-  const margins: Margins = { ...DEFAULT_MARGINS, top: 48 };
+  const margins: Margins = { ...marginsFor(chart), top: 48 };
   const plot = {
     x: margins.left,
     y: margins.top,
@@ -454,13 +481,22 @@ export function buildChartSvg(
   }
 
   if (chart.x.label) {
-    put(`<text x="${n(plot.x + plot.width / 2)}" y="${n(plot.y + plot.height + 42)}" fill="${esc(theme.text)}" font-family="${esc(theme.fontUi)}" font-size="13" text-anchor="middle">${esc(chart.x.label)}</text>`);
+    put(`<text x="${n(plot.x + plot.width / 2)}" y="${n(plot.y + plot.height + AXIS_CAPTION_DY)}" fill="${esc(theme.text)}" font-family="${esc(theme.fontUi)}" font-size="13" text-anchor="middle">${esc(chart.x.label)}</text>`);
   }
   if (chart.y.label) {
     // Rotated about its own centre, matching the on-screen axis. The translate places the anchor and
     // the rotate turns the text up the left gutter from there.
     const cy = plot.y + plot.height / 2;
-    put(`<text x="0" y="0" transform="translate(20 ${n(cy)}) rotate(-90)" fill="${esc(theme.text)}" font-family="${esc(theme.fontUi)}" font-size="13" text-anchor="middle">${esc(chart.y.label)}</text>`);
+    put(`<text x="0" y="0" transform="translate(${AXIS_CAPTION_DX} ${n(cy)}) rotate(-90)" fill="${esc(theme.text)}" font-family="${esc(theme.fontUi)}" font-size="13" text-anchor="middle">${esc(chart.y.label)}</text>`);
+  }
+  // Axis notes. The room for these comes from `marginsFor`, the same call the canvas makes, so a note
+  // cannot be clipped off the bottom of an exported file that shows fine on screen.
+  if (chart.x.note) {
+    put(`<text class="qc-axis-note" x="${n(plot.x + plot.width / 2)}" y="${n(plot.y + plot.height + AXIS_NOTE_DY)}" fill="${esc(theme.muted)}" font-family="${esc(theme.fontUi)}" font-size="${AXIS_NOTE_SIZE}" text-anchor="middle">${esc(chart.x.note)}</text>`);
+  }
+  if (chart.y.note) {
+    const cy = plot.y + plot.height / 2;
+    put(`<text class="qc-axis-note" x="0" y="0" transform="translate(${AXIS_NOTE_DX} ${n(cy)}) rotate(-90)" fill="${esc(theme.muted)}" font-family="${esc(theme.fontUi)}" font-size="${AXIS_NOTE_SIZE}" text-anchor="middle">${esc(chart.y.note)}</text>`);
   }
   if (chart.title) {
     put(`<text x="${n(plot.x)}" y="24" fill="${esc(theme.text)}" font-family="${esc(theme.fontUi)}" font-size="16" font-weight="600">${esc(chart.title)}</text>`);

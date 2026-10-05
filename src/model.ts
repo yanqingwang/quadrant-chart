@@ -19,6 +19,11 @@ export interface Axis {
   max: number;
   /** Optional explicit tick positions. When empty the view derives ticks from min/max. */
   ticks?: number[];
+  /**
+   * Optional line drawn beside the axis, in smaller muted text — the scale's provenance, what the
+   * score actually measures, where the numbers came from. Reserved room is added only when set.
+   */
+  note?: string;
 }
 
 /**
@@ -194,6 +199,9 @@ function normalizeAxis(raw: unknown, fallback: Axis, which: string): Axis {
     // Sorted and de-duplicated so the view can render them without re-checking.
     if (ticks.length) axis.ticks = [...new Set(ticks)].sort((a, b) => a - b);
   }
+  // Only a real non-empty string. An empty or whitespace-only note would otherwise reserve margin for
+  // a line with nothing on it.
+  if (typeof src['note'] === 'string' && src['note'].trim()) axis.note = src['note'].trim();
   // Referenced so a malformed axis is obvious in a stack trace rather than silently defaulted.
   void which;
   return axis;

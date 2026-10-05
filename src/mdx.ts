@@ -61,6 +61,9 @@ function round(n: number): number {
 function axisToYaml(axis: Chart['x']): Record<string, unknown> {
   const o: Record<string, unknown> = { label: axis.label, min: axis.min, max: axis.max };
   if (axis.ticks && axis.ticks.length) o['ticks'] = axis.ticks;
+  // Written last and only when set, so a chart without notes keeps the exact key order it always had
+  // and an untouched file produces an empty diff.
+  if (axis.note) o['note'] = axis.note;
   return o;
 }
 

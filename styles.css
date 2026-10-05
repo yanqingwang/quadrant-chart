@@ -120,6 +120,11 @@
   font-family: var(--font-interface);
 }
 
+.qc-axis-note {
+  fill: var(--text-muted);
+  font-size: 11px;
+}
+
 .qc-axis-label {
   fill: var(--text-normal);
   font-size: 13px;

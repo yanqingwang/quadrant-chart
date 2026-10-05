@@ -471,6 +471,24 @@ export class QuadrantChartView extends FileView {
     menu.showAtMouseEvent(e);
   }
 
+  /**
+   * Set or clear one axis note.
+   *
+   * Clearing goes through the same prompt as setting: an empty answer writes nothing, and the writer
+   * omits an absent note entirely, so removing one leaves no empty key behind in the file.
+   */
+  private async editAxisNote(which: 'x' | 'y'): Promise<void> {
+    const label = which === 'x' ? 'Note under the X axis' : 'Note beside the Y axis';
+    const text = await this.plugin.promptText(this.chart[which].note ?? '', label);
+    if (text === null) return;
+    const note = text.trim();
+    // `setAxis` treats an unchanged value as a no-op, so clearing when there was nothing to clear is
+    // already handled; this guard only keeps a whitespace-only answer from writing a blank note.
+    this.canvas?.setAxis(which, note ? { note } : { note: undefined });
+    this.chart = this.canvas?.getChart() ?? this.chart;
+    this.renderToolbar();
+  }
+
   private async pickAxes(e: MouseEvent): Promise<void> {
     const menu = new Menu();
     menu.addItem((it) => it.setTitle('Rename X axis…').onClick(() => void this.renameAxis('x')));
@@ -478,6 +496,20 @@ export class QuadrantChartView extends FileView {
     menu.addSeparator();
     menu.addItem((it) => it.setTitle('Set X range…').onClick(() => void this.setRange('x')));
     menu.addItem((it) => it.setTitle('Set Y range…').onClick(() => void this.setRange('y')));
+    menu.addSeparator();
+    // The current note goes in the title, not a description: this Obsidian version's MenuItem has no
+    // setDesc, and calling a method the runtime may not have would throw inside a menu click.
+    const noteTitle = (which: 'x' | 'y', where: string): string => {
+      const cur = this.chart[which].note;
+      const shown = cur && cur.length > 28 ? `${cur.slice(0, 28)}…` : cur;
+      return shown ? `${where} — "${shown}"` : where;
+    };
+    menu.addItem((it) => it
+      .setTitle(noteTitle('x', 'Note under the X axis…'))
+      .onClick(() => void this.editAxisNote('x')));
+    menu.addItem((it) => it
+      .setTitle(noteTitle('y', 'Note beside the Y axis…'))
+      .onClick(() => void this.editAxisNote('y')));
     menu.addSeparator();
     menu.addItem((it) => it.setTitle('Reset to defaults').onClick(() => this.resetChart()));
     menu.showAtMouseEvent(e);
