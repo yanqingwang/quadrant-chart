@@ -1,10 +1,16 @@
 # Quadrant Chart
 
+[English](#english) | [中文](#中文)
+
+---
+
+## English
+
 Draw labelled quadrant charts in Obsidian, with free-floating text placed anywhere on the plot.
 Charts live in `.mdx` files as plain YAML frontmatter, so they stay readable, hand-editable, and
 diff-friendly.
 
-## What it does
+### What it does
 
 - **Any N × M grid**, not just four quadrants. Set columns and rows independently, from 1×1 to 12×12.
 - **Labelled axes** — name the X and Y axes, set their ranges, and the tick values are derived.
@@ -27,7 +33,7 @@ diff-friendly.
   plugin never touches.
 - **Scriptable** — a chart is plain YAML, so anything that can write YAML can create one.
 
-## Using it
+### Using it
 
 **Create a chart** — command palette → *Create a blank chart*. Pick a name and it opens straight
 into the editor.
@@ -82,7 +88,7 @@ The file is written beside the `.mdx` and never overwrites an existing one.
 
 Everything you do is written straight to the file, so you can also just edit the YAML.
 
-## Limits
+### Limits
 
 **A label is a label, not a paragraph.** Free text wraps, but only at the configured width — see
 *Maximum label width* in the settings, 80% of the plot area by default. A 91-character Chinese label
@@ -101,7 +107,7 @@ that overhangs a differently tinted cell still shows the ring on the overhanging
 
 **No multi-select.** One label at a time — no marquee, no group operations.
 
-## Keyboard
+### Keyboard
 
 | Shortcut | Action |
 |---|---|
@@ -112,7 +118,7 @@ that overhangs a differently tinted cell still shows the ring on the overhanging
 A new change after an undo discards the redo branch, so redo can only replay something you have not
 since replaced.
 
-## The `.mdx` format
+### The `.mdx` format
 
 A chart is a YAML frontmatter block. The body after it is yours and is never modified.
 
@@ -165,7 +171,7 @@ One trap worth writing down, because it is not visible from the format:
 > still renders, it is just wrong. The same applies to a nine-box, where it inverts high and low
 > potential.
 
-## Generating charts programmatically
+### Generating charts programmatically
 
 Because a chart is plain YAML, **you do not need the plugin to create one.** Anything that can write
 YAML can produce a chart; the plugin only has to render it. That includes an LLM, a cron job, a
@@ -217,7 +223,7 @@ Worked examples, both generated through that API:
 - `/home/wang/wk/wk/SWOT-插件价值.mdx`
 - `/home/wang/wk/wk/人才九宫格-示例.mdx`
 
-### If you write a plugin that edits `.mdx`
+#### If you write a plugin that edits `.mdx`
 
 Use `app.vault.process(file, fn)` for the atomic read-modify-write.
 
@@ -226,12 +232,12 @@ Use `app.vault.process(file, fn)` for the atomic read-modify-write.
 > which is why it cost several rounds to track down. Its callback also takes `(frontmatter) => void`,
 > so a returned object is discarded.
 
-## Note on the extension
+### Note on the extension
 
 `.mdx` is also React's component-file suffix. There is no conflict inside Obsidian, which has no MDX
 pipeline of its own, but be aware of it if a vault ever gains a real MDX toolchain.
 
-## Building
+### Building
 
 ```bash
 npm install
@@ -245,3 +251,246 @@ To build straight into a vault's plugin folder:
 ```bash
 OUTDIR=~/vault/.obsidian/plugins/quadrant-chart npm run build
 ```
+
+### Issues & Feedback
+
+- GitHub Issues: https://github.com/yanqingwang/quadrant-chart/issues
+- Email: wangyantsing@qq.com
+
+---
+
+## 中文
+
+在 Obsidian 中绘制带标签的象限图，支持在图上任意位置放置自由文本。图表以纯 YAML frontmatter
+的形式保存在 `.mdx` 文件中，因此始终可读、可手动编辑、对 diff 友好。
+
+### 功能
+
+- **任意 N × M 网格**，不限于四个象限。列数和行数独立设置，从 1×1 到 12×12。
+- **带名称的坐标轴** — 为 X、Y 轴命名，设置范围，刻度值自动推导。需要时也支持显式指定刻度。
+- **轴注释** — 坐标轴旁一行较小的弱化文字，说明这条刻度到底代表什么：数字从哪来、是不是越大
+  越好。它会写进 `.mdx`，随图表一起保存，也可以由脚本生成。
+- **自由文本随处放置** — 标签不绑定象限。放在任意坐标上，拖动调整位置，双击编辑，右键删除。
+  过长的标签会按你设定的宽度换行。
+- **单元格标签、注释与颜色** — 给每个单元格命名，在下方添加更长的说明文字，并着色。
+- **标签样式** — 标签可以有自己的底色、外框和字号，落在任何位置都保持可读。
+- **重叠的标签也能选中** — 在同一位置连续点击可逐层下探，或使用 *Bring to front*（置于顶层）/
+  *Send to back*（置于底层）。
+- **撤销与重做** — <kbd>Ctrl</kbd>+<kbd>Z</kbd> 和 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>
+  可回退任何改动，包括误拖。
+- **导出** — 将图表保存为 `.mdx` 文件旁边的 JPG 或 PNG。
+- **内置示例** — SWOT 和人才九宫格，可从命令面板一键创建。
+- **笔记仍是你的笔记** — 图表就是 YAML frontmatter；其下方的正文插件从不触碰。
+- **可编程** — 图表就是纯 YAML，任何能写 YAML 的东西都能创建图表。
+
+### 使用方法
+
+**创建图表** — 命令面板 → *Create a blank chart*（创建空白图表）。起个名字就直接进入编辑器。
+
+**从示例开始** — 命令面板 → *Create from a worked example* → SWOT 或人才九宫格。你会得到现成的
+单元格、颜色、标签和一段可编辑的说明正文。
+
+**添加文本** — 在图上任意位置双击，或使用 *Add label* 按钮。没有指向任何对象时，新标签会落在
+你最后点击的单元格中央。标签宽度超过设定占比（默认 80%，见设置中的 *Maximum label width*）时
+会换行。
+
+**移动文本** — 拖动即可。
+
+**编辑文本** — 双击它，或选中后使用 *Label* 按钮 → *Edit text…*。清空文本即删除标签。
+
+**删除文本** — 右键它，或选中后使用 *Label* 按钮 → *Delete label*。
+
+**选中标签或单元格** — 点击即可。点击标签时选中的是标签，永远不会选中它下面的单元格；点击
+空白处则选中单元格。两者都以虚线框标示。
+
+**设置标签样式** — 选中标签，然后 *Label* → 背景颜色、*Draw a box around it*，或选择字号。
+*Default* 会清除字号覆盖，让标签恢复跟随图表设置。
+
+**选中被压在下面的标签** — 在同一位置反复点击逐层下探，或使用 *Send to back* / *Bring to
+front*。叠放顺序保存在文件里，重新加载后依然有效。
+
+**命名单元格** — 点击单元格，然后点击 **Cell** 按钮。
+
+**调整网格** — 使用 **Grid N×M** 按钮。列数和行数独立设置，按钮上始终显示当前尺寸。也可以直接
+在画布上拖动虚线分割线。
+
+**命名坐标轴 / 设置范围** — **Axes** 按钮，或直接点击画布上的 X / Y 轴标题。
+
+**添加轴注释** — **Axes** → *Note under the X axis…* / *Note beside the Y axis…*。X 轴注释绘制在
+轴标题下方，Y 轴注释沿左侧留白竖排，都用较小的弱化文字；写入了就预留空间，清空则收回空间。
+单元格注释说明的是某个单元格里有什么——轴注释说明的是整条刻度意味着什么，而这恰恰是象限图
+无法不言自明的东西。
+
+**导出图片** — **Export** 按钮，或命令面板 → *Export as an image*。
+
+| 选项 | 说明 |
+|---|---|
+| JPG | 文件最小。始终不透明——JPEG 没有 alpha 通道。 |
+| PNG | 无损，文字更锐利。 |
+| PNG, transparent | 适合自带背景的幻灯片和文档。 |
+| SVG | 矢量——任意缩放不失真，且在 git 中可 diff。 |
+| SVG, transparent | 同上，但没有背景矩形。 |
+
+文件写在 `.mdx` 旁边，从不覆盖已存在的文件。
+
+你做的每一步都会直接写入文件，所以也可以直接编辑 YAML。
+
+### 限制
+
+**标签是标签，不是段落。** 自由文本会换行，但只按设定的宽度——见设置中的 *Maximum label
+width*，默认为绘图区的 80%。默认 14px 下，91 个字符的中文标签需要 1180px，所以会换成两行。
+超过几百个字符，你得到的就是一摞高高的行，而不是一块可读的文字。
+
+由此有两点：
+
+- 标签保持在一个短语或一句话的量级，这正是这个格式的用途。
+- 需要段落时，放到**单元格的注释**里。单元格标签和注释按*单元格*宽度换行，这才是文字块该有的
+  度量，无论在屏幕上还是所有导出格式中。
+
+**每行只有一种描边色。** 让标签跨过网格线时仍可读的描边，颜色与该行所在单元格匹配，因此在
+自身背景上是隐形的。标签悬垂到颜色不同的单元格上时，悬垂部分仍会显示描边圈。
+
+**不支持多选。** 一次只能选中一个标签——没有框选，没有批量操作。
+
+### 快捷键
+
+| 快捷键 | 操作 |
+|---|---|
+| <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Z</kbd> | 撤销对此图表的上一次改动 |
+| <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> | 重做 |
+| <kbd>Ctrl</kbd>+<kbd>Y</kbd> | 重做（Windows 惯例） |
+
+撤销之后再做新改动会丢弃重做分支，所以重做只能重放你尚未被替换的操作。
+
+### `.mdx` 格式
+
+图表就是一个 YAML frontmatter 块。其后的正文属于你，插件从不修改。
+
+```markdown
+---
+quadrant-chart: 1
+title: Q1 Priorities
+x:
+  label: Impact
+  min: 0
+  max: 10
+y:
+  label: Urgency
+  min: 0
+  max: 10
+grid:
+  columns: 2
+  rows: 2
+cells:
+  - col: 1
+    row: 1
+    label: Do now
+    color: "#d93025"
+    note: Anything blocking a release
+items:
+  - id: a1
+    text: Rework the sync engine
+    x: 8.2
+    y: 9
+    background: "#fdd663"   # optional plate behind the text
+    box: true                # optional outline around it
+---
+
+Notes go here. The plugin never rewrites anything below the frontmatter.
+```
+
+坐标以**数据空间**存储——即坐标轴的 `min`/`max` 范围——而不是像素。调整窗格大小或改变范围都
+不会改写你的数字，这正是手机上保存的图表能在桌面上落在同一逻辑位置的原因。
+
+`quadrant-chart: 1` 是把文件标记为图表的标志。没有它，`.mdx` 文件不会被触碰。
+
+损坏的文件仍能打开：缺失字段回退到默认值，反转的轴范围会被修复，越界的单元格被丢弃。关键是
+你始终能看到文件本身去修复它。
+
+有一个坑值得写下来，因为它从格式上看不出来：
+
+> **`row 0` 是最下面一行。** 行沿 Y 从*最小值*方向计数，列沿 X 从最小值计数。搞反了，SWOT 会
+> 悄悄把「有益」和「有害」对调——图表照样渲染，只是内容错了。九宫格同理，高低潜力会颠倒。
+
+### 用脚本生成图表
+
+图表就是纯 YAML，所以**创建图表不需要插件。** 任何能写 YAML 的东西都能产出图表；插件只负责
+渲染。可以是 LLM、定时任务、表格导出，或另一个插件。
+
+本工作区附带一个参考实现：
+
+```bash
+python3 /home/wang/wk/Script/mdx_chart.py --help
+```
+
+```python
+import sys; sys.path.insert(0, "/home/wang/wk/Script")
+from mdx_chart import Chart, Axis
+
+chart = Chart(
+    title="SWOT",
+    x=Axis("Internal  ———  External", -5, 5),
+    y=Axis("Harmful  ———  Helpful", -5, 5),
+    columns=2, rows=2,
+)
+chart.add_cell(0, 1, "Strengths",     color="green",  note="Internal · helpful")
+chart.add_cell(0, 0, "Weaknesses",    color="red",    note="Internal · harmful")
+chart.add_cell(1, 1, "Opportunities", color="blue",   note="External · helpful")
+chart.add_cell(1, 0, "Threats",       color="orange", note="External · harmful")
+chart.add_item("Plain-text format — git-diffable", x=-3.4, y=4.2, item_id="s1")
+chart.save("SWOT.mdx", body="# Notes\n\nThis body is never rewritten.\n")
+```
+
+命令行同样支持这些操作：
+
+```bash
+python3 Script/mdx_chart.py create   --path Q1.mdx --title "Q1 Priorities" --columns 2 --rows 2
+python3 Script/mdx_chart.py set-cell --path Q1.mdx --col 1 --row 1 --label "Do now" --color red
+python3 Script/mdx_chart.py add-item --path Q1.mdx --text "Rework sync engine" --x 8.2 --y 9
+python3 Script/mdx_chart.py show     --path Q1.mdx        # JSON, for an agent to read
+```
+
+它就地编辑：`load()` 同时返回图表*和*正文，`save()` 只重写 frontmatter，因此写在图表下方的
+笔记得以保留。不带 `--force` 的 `create` 拒绝覆盖，也拒绝碰一个根本不是图表的文件。
+
+**完整参考——[`docs/API.md`](docs/API.md)。** 它是为 agent 阅读而写的：字段表、完整的 API 面、
+CLI、SWOT 与人才九宫格的完整配方、调色板、写入前检查清单，以及下面的 `processFrontMatter`
+警告。
+
+以下两个实例都是通过该 API 生成的：
+
+- `/home/wang/wk/wk/SWOT-插件价值.mdx`
+- `/home/wang/wk/wk/人才九宫格-示例.mdx`
+
+#### 如果你要写一个会编辑 `.mdx` 的插件
+
+原子读-改-写请使用 `app.vault.process(file, fn)`。
+
+> **不要在 `.mdx` 文件上使用 `fileManager.processFrontMatter`。** 在真实 vault 上实测，它能成功
+> resolve 却什么也不写——文件字节不变。这是一个*静默*的 no-op，这也是为什么它花了好几轮才
+> 定位。它的回调签名也是 `(frontmatter) => void`，返回的对象会被丢弃。
+
+### 关于扩展名
+
+`.mdx` 同时也是 React 组件文件的后缀。在 Obsidian 内部没有冲突——Obsidian 没有自己的 MDX
+管线——但如果 vault 将来装上真正的 MDX 工具链，需要留意这一点。
+
+### 构建
+
+```bash
+npm install
+npm run build     # typecheck + production bundle -> main.js
+npm test          # 377 tests: format, geometry, hit-testing, undo, image export, the
+                  # save path, and interoperability with Script/mdx_chart.py
+```
+
+直接构建到 vault 的插件目录：
+
+```bash
+OUTDIR=~/vault/.obsidian/plugins/quadrant-chart npm run build
+```
+
+### 问题与反馈
+
+- GitHub Issues: https://github.com/yanqingwang/quadrant-chart/issues
+- 邮箱：wangyantsing@qq.com
